@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Wuling.App/Wuling.App.csproj" />
+    <Project Path="src/Wuling.Core/Wuling.Core.csproj" />
+    <Project Path="src/Wuling.Imaging/Wuling.Imaging.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Wuling.Core.Tests/Wuling.Core.Tests.csproj" />
+  </Folder>
+</Solution>

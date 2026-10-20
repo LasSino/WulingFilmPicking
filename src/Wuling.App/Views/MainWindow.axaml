@@ -1,0 +1,196 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Wuling.App.ViewModels"
+        xmlns:app="using:Wuling.App.Views"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="800"
+        x:Class="Wuling.App.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="武陵选片局" Width="1440" Height="900" MinWidth="1120" MinHeight="720">
+
+    <Design.DataContext>
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <DockPanel>
+        <!-- 菜单栏 -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="文件(_F)">
+                <MenuItem Header="打开目录…" Command="{Binding OpenDirectoryCommand}" InputGesture="Ctrl+O" />
+                <MenuItem Header="保存进度" Command="{Binding SaveSessionCommand}" InputGesture="Ctrl+S" />
+                <MenuItem Header="完成并处理…" Command="{Binding CommitCommand}" InputGesture="Ctrl+Enter" />
+                <MenuItem Header="处理设置…" Click="OnOpenSettings" />
+                <Separator />
+                <MenuItem Header="退出" Command="{Binding $parent[Window].Close}" />
+            </MenuItem>
+        </Menu>
+
+        <!-- 状态栏 -->
+        <Border DockPanel.Dock="Bottom" Padding="12,6" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding Greeting}" VerticalAlignment="Center" Opacity="0.7" />
+                    <Button Content="完成" Command="{Binding CommitCommand}" FontWeight="SemiBold" />
+                    <Button Content="打开目录…" Command="{Binding OpenDirectoryCommand}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 主体: 浏览条(Auto, 只占卡片高度) + 模式条(独立行) + 对比区(剩余全部) -->
+        <Grid RowDefinitions="Auto,Auto,*" Margin="8,4">
+            <!-- 浏览条: 高度由卡片决定, 不随选中数变化; 多选驱动对比区槽位(最多 9) -->
+            <ListBox x:Name="StripList" ItemsSource="{Binding Cards}"
+                     SelectionMode="Multiple"
+                     SelectionChanged="OnStripSelectionChanged"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                     Background="Transparent">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Top" />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PhotoCardViewModel">
+                        <Border Width="120" Padding="6" CornerRadius="6" BorderThickness="1"
+                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                            <StackPanel Spacing="4">
+                                <Grid>
+                                    <Border Height="96" CornerRadius="4" Background="#1E1E1E">
+                                        <Panel>
+                                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"
+                                                   IsVisible="{Binding IsThumbnailReady}" />
+                                            <TextBlock Text="🖼" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Opacity="0.35" IsVisible="{Binding !IsThumbnailReady}" />
+                                            <TextBlock Text="RAW⇄JPG" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                                       Margin="0,0,2,2" Opacity="0.8" Foreground="#CCFFFFFF" IsVisible="{Binding HasRawJpegPair}" />
+                                        </Panel>
+                                    </Border>
+                                    <!-- 标记状态徽点: 右上角, 绿=选中 红=废弃(色彩+形状双通道) -->
+                                    <Ellipse Width="14" Height="14" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                             Margin="0,-4,-4,0" Stroke="#66FFFFFF" StrokeThickness="1"
+                                             Fill="{Binding Tag, Converter={x:Static app:BadgeBrushConverter.Instance}}"
+                                             IsVisible="{Binding IsMarked}" ToolTip.Tip="{Binding Tag}" />
+                                </Grid>
+                                <TextBlock Text="{Binding DisplayName}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- 模式条: 独立纤细行(01 §2.2 ModeBar;M2 接入 JPEG/EXIF 两个内置模式,M3 起插件挂载) -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6" Margin="0,4,0,4">
+                <TextBlock Text="对比模式" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <ToggleButton Content="JPEG预览" IsChecked="{Binding IsExifMode, Converter={x:Static BoolConverters.Not}, Mode=OneWay}"
+                              Command="{Binding SetModeCommand}" CommandParameter="jpeg" />
+                <ToggleButton Content="EXIF" IsChecked="{Binding IsExifMode, Mode=OneWay}"
+                              Command="{Binding SetModeCommand}" CommandParameter="exif" />
+                <ToggleButton Content="RAW预览" IsEnabled="False" />
+                <ToggleButton Content="差分" IsEnabled="False" />
+            </StackPanel>
+
+            <!-- 对比区: 模式内容层 + 宿主 chrome 层(标记按钮浮在每个槽右下, 不随模式变化; M3 插件契约中 chrome 归宿主) -->
+            <Grid Grid.Row="2">
+                <!-- JPEG 预览模式 -->
+                <ItemsControl x:Name="CompareGrid" ItemsSource="{Binding Slots}" IsVisible="{Binding !IsExifMode}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PhotoCardViewModel">
+                            <!-- 模式内容: 整格图片 + 文件名/EXIF 摘要浮条(标记按钮在宿主 chrome 层) -->
+                            <Border Margin="2" CornerRadius="8" BorderThickness="1"
+                                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                                <Panel>
+                                    <Image Source="{Binding CompareView}" Stretch="Uniform" />
+                                    <Border HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                                            Margin="0,0,0,10" CornerRadius="4" Padding="10,2"
+                                            Background="#99000000">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Text="{Binding DisplayName}" FontSize="12" Foreground="White" />
+                                            <TextBlock Text="{Binding ExifSummaryText}" FontSize="11" Foreground="#CCFFFFFF"
+                                                       IsVisible="{Binding ExifSummaryText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                        </StackPanel>
+                                    </Border>
+                                </Panel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- EXIF 对比模式: 每槽一张参数卡(卡头文件名 + 字段行), 差异字段高亮 -->
+                <ItemsControl ItemsSource="{Binding ExifCompare.Cards}" IsVisible="{Binding IsExifMode}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ExifSlotCard">
+                            <Border Margin="2" CornerRadius="8" BorderThickness="1"
+                                    BorderBrush="#44FFFFFF"
+                                    Background="#F2222222">
+                                <ScrollViewer>
+                                    <StackPanel Margin="12,8">
+                                        <TextBlock Text="{Binding FileName}" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="#FFFFFFFF" Margin="0,0,0,8" />
+                                        <ItemsControl ItemsSource="{Binding Rows}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:ExifFieldRow">
+                                                    <Grid ColumnDefinitions="72,*" Margin="0,3">
+                                                        <TextBlock Text="{Binding Label}" FontSize="12"
+                                                                   Foreground="#99FFFFFF" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding OwnValue}" FontSize="12" TextWrapping="Wrap"
+                                                                   FontFamily="Cascadia Mono,Consolas,monospace"
+                                                                   Foreground="{Binding Differs, Converter={x:Static app:DiffersToBrushConverter.Instance}}" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- 宿主 chrome 层: 标记按钮浮在每个槽右下角, 覆盖所有模式(M3 插件契约中 chrome 归宿主);
+                     用与内容层相同的 UniformGrid 保证对齐; 激活态由 MarkToBrushConverter 按 Tag 声明式驱动 -->
+                <ItemsControl ItemsSource="{Binding Slots}" Focusable="False" Background="Transparent">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PhotoCardViewModel">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                        Spacing="4" Margin="0,0,8,8">
+                                <Button Click="OnToggleSelected" ToolTip.Tip="标记选中 / 取消"
+                                        Background="{Binding Tag, Converter={x:Static app:MarkToBrushConverter.SelectedInstance}}">
+                                    <TextBlock Text="✅" />
+                                </Button>
+                                <Button Click="OnToggleRejected" ToolTip.Tip="标记废弃 / 取消"
+                                        Background="{Binding Tag, Converter={x:Static app:MarkToBrushConverter.RejectedInstance}}">
+                                    <TextBlock Text="🗑" />
+                                </Button>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- 空态: 无多选时 -->
+                <TextBlock Text="对比区 — 在上方浏览条多选(最多 9 张)即进入对比区"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Opacity="0.5" IsVisible="{Binding HasNoSlots}" />
+            </Grid>
+        </Grid>
+    </DockPanel>
+
+</Window>

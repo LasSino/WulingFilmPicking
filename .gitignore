@@ -1,0 +1,40 @@
+# ---------- .NET ----------
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# ---------- IDE ----------
+.vscode/
+*.swp
+
+# ---------- 运行时工作目录(会话/缓存/回收站, 见设计文档 02 §9) ----------
+.wuling/
+
+# ---------- 本地测试样张(不入库; 样例应放 docs/test-fixtures) ----------
+/*.JPG
+/*.JPEG
+/*.jpg
+/*.jpeg
+/*.CR2
+/*.CR3
+/*.NEF
+/*.NRW
+/*.ARW
+/*.RAF
+/*.RW2
+/*.ORF
+/*.DNG
+/*.PEF
+/*.X3F
+/*.SRW
+/3images.png
+/4images.png
+/8images.png
+/image.png
+
+# ---------- 发布/打包产物 ----------
+publish/
+*.appx
+*.msix

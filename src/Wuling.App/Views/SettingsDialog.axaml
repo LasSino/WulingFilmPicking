@@ -1,0 +1,48 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="420"
+        x:Class="Wuling.App.Views.SettingsDialog"
+        Title="处理设置" Width="560" Height="440" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="16" RowSpacing="10">
+        <TextBlock Text="提交时对三类标记分别执行的动作(03 F8)" TextWrapping="Wrap" Opacity="0.8" />
+
+        <StackPanel Grid.Row="1" Spacing="8">
+            <TextBlock Text="✅ 选中的照片" FontWeight="SemiBold" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <RadioButton x:Name="SelNone" Content="不做处理" IsChecked="True" />
+                <RadioButton x:Name="SelMove" Content="移动到:" />
+                <TextBox x:Name="SelTarget" Width="260" IsEnabled="{Binding #SelMove.IsChecked}" />
+                <Button Content="…" Click="OnPickSelTarget" />
+            </StackPanel>
+
+            <TextBlock Text="🗑 废弃的照片" FontWeight="SemiBold" Margin="0,8,0,0" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <RadioButton x:Name="RejSoft" Content="软删除(可还原)" IsChecked="True" />
+                <RadioButton x:Name="RejDelete" Content="永久删除" />
+                <RadioButton x:Name="RejNone" Content="不做处理" />
+            </StackPanel>
+
+            <TextBlock Text="⬜ 未标记的照片" FontWeight="SemiBold" Margin="0,8,0,0" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <RadioButton x:Name="UnmNone" Content="不做处理" IsChecked="True" />
+                <RadioButton x:Name="UnmMove" Content="移动到:" />
+                <TextBox x:Name="UnmTarget" Width="260" IsEnabled="{Binding #UnmMove.IsChecked}" />
+                <Button Content="…" Click="OnPickUnmTarget" />
+            </StackPanel>
+        </StackPanel>
+
+        <CheckBox Grid.Row="2" x:Name="KeepPairs" Content="RAW+JPEG 同名对绑定处置(防拆散)" IsChecked="True" />
+
+        <TextBlock Grid.Row="3" Text="软删除会移入 .wuling/trash/ 并记录事务日志,可整批还原;永久删除不可恢复。"
+                   TextWrapping="Wrap" FontSize="11" Opacity="0.6" />
+
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="保存" Click="OnSave" FontWeight="SemiBold" />
+            <Button Content="取消" Click="OnCancel" />
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="480" d:DesignHeight="360"
+        x:Class="Wuling.App.Views.CommitDialog"
+        Title="完成并处理" Width="520" Height="420" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="*,Auto,Auto,Auto" Margin="16">
+        <TextBlock Text="提交确认 — 将执行以下动作:" FontWeight="SemiBold" Margin="0,0,0,8" />
+        <TextBox Grid.Row="1" x:Name="SummaryBox" IsReadOnly="True" MinHeight="200"
+                 FontFamily="Cascadia Mono,Consolas,monospace" TextWrapping="NoWrap" AcceptsReturn="True" />
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+            <Button x:Name="OkButton" Content="执行" Click="OnExecute" FontWeight="SemiBold" />
+            <Button Content="取消" Click="OnCancel" />
+        </StackPanel>
+        <ProgressBar Grid.Row="3" x:Name="Progress" IsIndeterminate="True" Height="4" Margin="0,12,0,0"
+                     IsVisible="False" />
+    </Grid>
+</Window>

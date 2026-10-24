@@ -26,5 +26,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Wuling.Core\Wuling.Core.csproj" />
     <ProjectReference Include="..\Wuling.Imaging\Wuling.Imaging.csproj" />
+    <ProjectReference Include="..\Wuling.Plugins\Wuling.Plugins.csproj" />
+    <ProjectReference Include="..\Wuling.Plugins.Abstractions\Wuling.Plugins.Abstractions.csproj" />
+    <ProjectReference Include="..\Wuling.Plugins.BuiltIn\Wuling.Plugins.BuiltIn.csproj" />
+    <ProjectReference Include="..\Wuling.Plugins.Python\Wuling.Plugins.Python.csproj" />
   </ItemGroup>
 </Project>

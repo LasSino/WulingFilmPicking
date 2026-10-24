@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wuling.Plugins.Abstractions\Wuling.Plugins.Abstractions.csproj" />
+    <ProjectReference Include="..\Wuling.Plugins.BuiltIn\Wuling.Plugins.BuiltIn.csproj" />
+    <ProjectReference Include="..\Wuling.Plugins.Python\Wuling.Plugins.Python.csproj" />
+    <ProjectReference Include="..\Wuling.Core\Wuling.Core.csproj" />
+    <ProjectReference Include="..\Wuling.Imaging\Wuling.Imaging.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

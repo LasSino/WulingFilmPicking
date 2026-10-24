@@ -192,10 +192,150 @@ sequenceDiagram
 | 像素/大文件 | 传**路径或缓存键**而非裸字节;宿主把解码预览落 `.wuling/cache/plugin_io/{key}.jpg`,Worker 读取后回传结果图路径;一次性会话结束由宿主清理(防泄漏) |
 | 超时 | 渲染默认 3s 超时→该槽显示超时占位,Worker 不杀;累计 3 次超时→插件禁用 |
 | SDK | 随应用分发 `wuling_sdk`(纯 Python,仅标准库),内含 `PluginBase`、声明式视图构造器、EXIF 代理(Worker 侧独立 `exiftool`/`pillow-heif` 可选) |
-| 环境自检 | 启用时检测解释器版本 ≥3.9;`deps` 缺失→模式按钮灰态+一键"在终端打开 pip 安装指引" |
+| 环境自检 | 启用时检测解释器版本 ≥3.9;`deps` 缺失→灰态+引导安装(见 §4.5),不再要求用户手动 pip |
 | 安全 | 插件以用户权限运行(与主程序一致);不做沙箱,但文档明确"只安装可信来源插件";宿主限制 Worker 可访问路径清单(默认: 照片目录 + 缓存目录) |
 
 **为什么不用 pythonnet 嵌入**: 嵌入式解释器锁定单一 Python 版本、GIL 阻塞 UI 线程互操作、平台二进制分发复杂;进程外 Worker 崩溃隔离且用户可用任意 ≥3.9 环境(conda/venv/系统)。
+
+### 4.5 Python 运行时分发与依赖环境管理(M4)
+
+**核心原则**: 依赖永不进主程序包 —— 主包只带"纯 stdlib 运行时";deps 归插件自己声明、自己携带(wheels),宿主只做检查、引导安装与隔离。
+
+#### 4.5.1 解释器解析链(M4 目标形态)
+
+```
+设置中显式指定 → WULING_PYTHON 环境变量 → 内置运行时(随应用分发) → PATH → 已知安装位置
+```
+
+- M3 开发期的硬编码路径(开发机专用)在 M4 删除, 开发者用 `WULING_PYTHON` 指路。
+
+#### 4.5.2 内置运行时选型
+
+| 方案 | 体积 | 特点 |
+| --- | --- | --- |
+| **Windows embeddable package**(python.org 官方) | 下载 ~11MB, 解压 ~17MB | 官方出品、PSF 许可可再分发;默认无 pip、`python3xx._pth` 需解锁;**无法建 venv** |
+| python-build-standalone(uv/ruff 生态同款) | ~30-60MB | 完整可重定位安装, pip/venv 可用, 跨平台一致 |
+
+**决策: Windows 用 embeddable package;macOS/Linux(若做)用 python-build-standalone。**
+
+理由: 契约已决定 `wuling_sdk` 纯标准库、Worker 协议只依赖 stdlib —— 内置 Python 只是"跑协议循环的运行时", 不需要包管理能力;~17MB 换"开箱即用"。摄影用户大概率未装 Python, 内置运行时决定 Python 插件功能对普通用户是否存在。
+
+分发形态:
+
+- 运行时放 `<app>/plugins/runtime/python/`, 与 Worker 脚本(`plugins/python/`)解耦;打包时均为 Content 文件, 与 .NET 自包含/单文件发布无冲突(单文件发布时 Content 仍落盘)。
+- 许可: PSF license 允许再分发, 发布包内附 Python LICENSE 文本。
+- 纯 stdlib 约定 = **api:1 阶段内置运行时不预装任何第三方包**。
+
+#### 4.5.3 插件依赖分发形态: 插件 = 自包含目录
+
+```text
+plugins/python/heatmap/
+├── plugin.json          # deps: ["numpy>=1.26,<3"], "python": ">=3.9"
+├── main.py
+├── wheels/              # 可选: 离线 wheel 包(推荐)
+│   ├── numpy-2.1.3-cp312-win_amd64.whl
+│   └── ...
+└── README.md
+```
+
+- **带 `wheels/` 是首选**: 插件作者锁定版本随插件打包, 用户安装零网络依赖、零解析意外。分发载体是一个 zip/文件夹, 解压到 `AppData/Wuling/plugins/python/<id>/`(用户目录覆盖应用目录, 规则同 §5)。
+- 平台注意: numpy 等 C 扩展 wheel 带 `cp3x-win_amd64` 平台标签, 插件作者按目标平台带齐;纯 Python 依赖不受影响。
+- 未带 `wheels/` 且本机缺失依赖 → 灰态 + 提示"此插件需要自定义 Python 环境"(走 §4.5.1 解析链指向用户 venv/conda)。两条路并存。
+
+#### 4.5.4 依赖安装与隔离
+
+```mermaid
+sequenceDiagram
+    participant U as 用户(启用插件)
+    participant H as 宿主(PluginHost)
+    participant W as Worker
+
+    U->>H: 启用 heatmap
+    H->>H: import numpy 探测 → 缺失
+    H->>H: 安装 wheels → .wuling 专属 env 目录
+    H->>W: 启动【插件专属 Worker】, sys.path 前置 env 目录
+    W->>W: 装载 heatmap → render 正常
+    Note over H: 失败 → 模式灰态 + 错误详情(沿用 §4 降级)
+```
+
+| 项 | 决策 | 理由 |
+| --- | --- | --- |
+| 安装目标 | `AppData/Wuling/plugin_env/<pluginId>/<depsHash>/`, **每插件独立目录** | 照片目录可能在 SD 卡上(空间敏感+拔卡消失);depsHash 使"升级插件→重建 env"自然发生 |
+| 隔离粒度 | **有 deps 的插件独享一个 Worker**(sys.path 指向自己的 env);纯 stdlib 插件继续共享主 Worker | 两个插件分别要 numpy 1.x/2.x 时, 同进程 sys.path 必冲突;"每个解释器一个 Worker"是 §4 既定进程模型, 此处落到插件粒度 |
+| 安装引擎 | 首选: 构建期给内置 embeddable 运行时预装 pip;或主包带 `uv.exe`(~15MB)作安装引擎(`uv pip install --target`) | embeddable 默认无 pip;uv 无需解释器即可安装, 速度快且免构建期 hack |
+| 安装降级 | `pip install --target` 本质 ≈ 解包 wheel;首版可绕过 pip 直接解 wheel 到 env 目录 | 规避 embeddable 无 pip 的问题, 大部分场景等价 |
+
+#### 4.5.5 体积与版本纪律
+
+- 主包体积不变(numpy 永不进入);成本转移到"用到该插件的人" —— heatmap 插件 zip 带 numpy wheel ≈ +15MB, 仅安装该插件时付出。
+- `plugin.json` 的 deps **必须带上限**(`numpy>=1.26,<3`): 宿主按 depsHash 缓存, 插件作者升级依赖 = 重建 env。
+- numpy 2.x 对 1.x 编译的 C 扩展不兼容 —— 这是"每插件独立 env"而非共享 site 目录的硬理由。
+- env 目录可再生(与 §3.2 plugin_io 同哲学): 删除即重建;卸载插件 = 删插件目录 + 对应 env。
+- 实施里程碑: 随 M4 打包一起(安装引擎选型 pip-vs-uv 与打包形态绑定)。
+
+### 4.6 渲染性能(M4 性能专题)
+
+> 背景: M3 验收时发现 Python Hello 模式点击选片后出图慢。实测延迟链拆解 —— RPC 往返 <50ms, Worker 冷启动 200-400ms(已在打开目录时摊销), **大头是 UI 线程上的全尺寸原图解码**(24MP JPEG 单张 100-500ms, 7 槽串行, 且每次刷新零缓存重解)。
+
+#### 4.6.1 两类插件, 两条优化路线
+
+| 插件类型 | 图像需求 | 正确路线 |
+| --- | --- | --- |
+| **展示类**(预览/EXIF/直方图/Hello) | 屏上单格 ≤2048px, 4K 屏 3×3 宫格单格 ~1280px | **降采样走宿主缓存**(§3.1 通道①): `GetView(pair, 1024~2048)` 命中 LRU, 解码 20ms 级, 二次显示 0ms。这不是权宜之计, 是此类插件的终态 |
+| **计算类**(差分/堆栈/对齐/AI) | 绕不开大像素 | 见 4.6.2-4.6.5: 预解码落盘 + 并行 Worker 池 + 按槽异步 + 增量跳过 |
+
+关键认知: 对计算类插件, **宿主 C# 侧解 24MP 同样要几百 ms** —— Python 不是天然慢的一方, **解码 + 像素搬运才是**。优化重心是消灭重复解码与串行等待, 而非"让 Python 变快"。
+
+#### 4.6.2 预解码落盘(消灭重复解码, 单项收益最大)
+
+宿主把降采样后的 **Bgra8888 原始字节直接落盘** `.wuling/cache/plugin_io/{input_key}.raw`(内容寻址 key 已在 §3.2 定义):
+
+- 插件读 60MB 顺序 IO ~50ms, **跳过解码**(链路中最贵的一段)
+- 跨槽位/跨会话全命中缓存(可再生, 清理策略同 §3.2)
+- 插件侧 numpy 可 `np.frombuffer` + `reshape` 零拷贝读入
+- 宿主预解码可 4 线程并行(C# 解码是 GIL-free 的原生代码)
+
+#### 4.6.3 并行化: Worker 池, 而非每图一进程
+
+| 方案 | 评估 |
+| --- | --- |
+| 每图一个 Worker(max=9 进程) | ❌ 9 × 30-80MB 基线内存;进程冷启动 200-400ms 摊到每次渲染;管理成本失控 |
+| **N = 物理核数的 Worker 池(2-4 个), 槽位任务分发** | ✅ 9 张图切分为 9 个独立任务, 尾延迟 ≈ 最慢单图而非总和;空闲回收(§4 已有 10 分钟回收设计) |
+| **Worker 内线程池** | ✅ 零额外进程。numpy/PIL 重活释放 GIL, `concurrent.futures` 4 线程即真并行;纯 Python 循环退化为串行但不比现在差 |
+| 宿主并行解码 + 只喂小图 | ✅ 配合项: C# 侧并行解 9 张 + 降采样, 把输入准备时间也并行掉 |
+
+**决策: 双层并行 = N-Worker 池(2-4, 宿主按 `Environment.ProcessorCount` 与插件声明的 `parallelism` 能力协商) + Worker 内线程池。** 有 deps 的插件独享 Worker(§4.5.4)时, 该专属 Worker 同样进池化模型。
+
+#### 4.6.4 按槽异步渲染(并行收益落到体感的前提)
+
+当前 `render` 是整批同步 RPC: 9 槽一枪, 最慢的图拖住全部。改为:
+
+- `render_slot(slotIndex)` 按槽请求, **哪个槽先回来哪个先上屏**(未就绪槽显示骨架占位)
+- 防抖 100ms + 渲染序号防乱序(旧响应丢弃)—— 快速多选时请求堆积与覆盖问题一并解决
+- 协议向后兼容: `render`(整批)保留为便捷封装, 内部拆发 `render_slot`
+
+#### 4.6.5 增量渲染(工作量杠杆)
+
+`render_slot` 请求携带每槽**内容 key**(路径+mtime+参数哈希, 与 §3.2 input_key 同构):
+
+- 内容未变的槽, 插件返回 `{cached: true}` 跳过重算
+- 切一张图只重算一张: 从 9 份工作降到 1 份, 是交互流畅度的最大杠杆
+- Worker 侧缓存即可, 宿主不感知
+
+#### 4.6.6 顺带修复(M3 已知问题)
+
+| 问题 | 修法 |
+| --- | --- |
+| Worker stderr 无排水 → 写满 ~4KB 管道缓冲死锁(表现为 3 次超时→禁用) | 常驻 drain 任务, 内容进诊断日志与错误态 |
+| WriteLoop 15ms 轮询 | `Channel<string>` + `await reader` |
+| `PythonSlotView.PreviewBitmap` UI 线程同步解码、无缓存 | 后台解码 + 占位回填 + 按路径 LRU |
+| Worker 冷启动 `await` 在 LoadDirectoryAsync 内 | fire-and-forget 预热, 完成后刷新 Modes |
+
+#### 4.6.7 演进备案
+
+高频像素需求 → `shared_memory` 传输(numpy mmap 零拷贝), 彻底消灭序列化。§3 已预留, 首版不做。
+
+**实施顺序(M4)**: §4.6.6 观测/修复 → §4.6.4 按槽异步 → §4.6.2 预解码落盘 → §4.6.3 Worker 池 → §4.6.5 增量。每步独立可测, 第一步消掉"最慢图拖全场"的体感。
 
 ## 5. 插件发现、加载与生命周期
 

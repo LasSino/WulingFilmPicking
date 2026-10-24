@@ -3,6 +3,10 @@
     <Project Path="src/Wuling.App/Wuling.App.csproj" />
     <Project Path="src/Wuling.Core/Wuling.Core.csproj" />
     <Project Path="src/Wuling.Imaging/Wuling.Imaging.csproj" />
+    <Project Path="src/Wuling.Plugins.Abstractions/Wuling.Plugins.Abstractions.csproj" />
+    <Project Path="src/Wuling.Plugins.BuiltIn/Wuling.Plugins.BuiltIn.csproj" />
+    <Project Path="src/Wuling.Plugins.Python/Wuling.Plugins.Python.csproj" />
+    <Project Path="src/Wuling.Plugins/Wuling.Plugins.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Wuling.Core.Tests/Wuling.Core.Tests.csproj" />

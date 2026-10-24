@@ -11,6 +11,8 @@ using Wuling.Core.Scanning;
 using Wuling.Core.Sessions;
 using Wuling.Core.Tagging;
 using Wuling.Imaging;
+using Wuling.Plugins.Abstractions;
+using Wuling.Plugins.BuiltIn;
 
 namespace Wuling.App.ViewModels;
 
@@ -23,6 +25,92 @@ public partial class MainViewModel : ViewModelBase
     private readonly DirectoryScanner _scanner = new();
     private readonly ExifProvider _exif = new();
     private ThumbnailService? _thumbnails;
+    private Wuling.Plugins.PluginHost? _pluginHost;
+    private Wuling.Plugins.CompareContext? _pluginContext;
+
+    /// <summary>插件宿主初始化(M3): 内置 C# 插件 + Python 插件发现(失败不阻塞宿主)。</summary>
+    private async Task EnsurePluginHostAsync()
+    {
+        if (_pluginHost is not null)
+        {
+            return;
+        }
+
+        _pluginHost = new Wuling.Plugins.PluginHost(() => new Wuling.Plugins.PluginServicesBridge(_exif, _thumbnails!));
+        await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.JpegPreviewPlugin());
+        await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.ExifComparePlugin());
+        await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.HelloPlugin());
+
+        // Python 插件发现(04 §5): plugins/python/*/plugin.json; 解释器不可用则静默跳过
+        var pythonExe = FindPythonInterpreter();
+        if (pythonExe is not null)
+        {
+            try
+            {
+                _pythonRegistry = new Wuling.Plugins.Python.PythonPluginRegistry(pythonExe);
+                foreach (var adapter in await _pythonRegistry.DiscoverAsync())
+                {
+                    await _pluginHost.RegisterAsync(adapter);
+                }
+            }
+            catch
+            {
+                // Worker 启动失败 → Python 插件全部灰态(04 §4);宿主继续运行
+            }
+        }
+
+        RebuildModeButtons();
+    }
+
+    /// <summary>注册完成后重建模式按钮列表, 并按当前模式刷高亮。</summary>
+    private void RebuildModeButtons()
+    {
+        _modeButtons.Clear();
+        foreach (var descriptor in _pluginHost?.Plugins.Select(p => p.Descriptor) ?? [])
+        {
+            _modeButtons.Add(new ModeButtonViewModel(descriptor));
+        }
+
+        RefreshModeButtons();
+        OnPropertyChanged(nameof(Modes));
+    }
+
+    private void RefreshModeButtons()
+    {
+        foreach (var button in _modeButtons)
+        {
+            button.SetChecked(button.Descriptor.Id == CurrentMode);
+        }
+    }
+
+    private Wuling.Plugins.Python.PythonPluginRegistry? _pythonRegistry;
+
+    /// <summary>解释器发现: 设置优先 → PATH → 常见安装位置(M3 首版简化)。</summary>
+    private static string? FindPythonInterpreter()
+    {
+        var candidates = new[]
+        {
+            Environment.GetEnvironmentVariable("WULING_PYTHON"),
+            "C:\\Installations\\Programming\\Python\\python.exe",
+        }.Where(p => !string.IsNullOrEmpty(p) && System.IO.File.Exists(p));
+
+        var fromPath = "python.exe";
+        try
+        {
+            var pathDirs = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(';');
+            var hit = pathDirs.Select(d => System.IO.Path.Combine(d, fromPath)).FirstOrDefault(System.IO.File.Exists);
+            if (hit is not null)
+            {
+                return hit;
+            }
+        }
+        catch
+        {
+            // PATH 解析失败 → 落到固定候选
+        }
+
+        return candidates.FirstOrDefault();
+    }
 
     [ObservableProperty]
     private string _greeting = "武陵选片局 — 打开一个照片目录开始";
@@ -69,6 +157,20 @@ public partial class MainViewModel : ViewModelBase
 
         // 对比区加载全清晰度视图(M2: 与浏览条 96px 缩略图分级)
         _ = LoadCompareViewsAsync(chosen);
+
+        // M3: 向插件上下文分发槽位变化(契约 SlotsChanged)
+        var pluginCards = Slots.Select(s => Wuling.Plugins.PluginHost.ToCard(s.Pair)).ToList();
+        if (_pluginContext is null)
+        {
+            _pluginContext = new Wuling.Plugins.CompareContext(pluginCards);
+        }
+        else
+        {
+            _pluginContext.UpdateSlots(pluginCards);
+        }
+
+        OnPropertyChanged(nameof(ModeView));
+
         OnSlotsChanged(saveSession);
     }
 
@@ -90,21 +192,45 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>对比区解码边长: 2560px 足以覆盖 4K 屏 3×3 宫格的单格需求。</summary>
     public const int CompareViewEdge = 2560;
 
-    /// <summary>当前对比模式(M2: jpeg/exif;M3 起模式由插件提供)。</summary>
+    /// <summary>可用对比模式(M3 插件驱动;包装为按钮 VM, IsChecked 随 CurrentMode 刷新)。</summary>
+    public System.Collections.ObjectModel.ObservableCollection<ModeButtonViewModel> Modes => _modeButtons;
+
+    private readonly System.Collections.ObjectModel.ObservableCollection<ModeButtonViewModel> _modeButtons = [];
+
+    /// <summary>当前激活模式 id。</summary>
     [ObservableProperty]
-    private string _currentMode = "jpeg";
+    private string _currentMode = "builtin.jpeg";
+
+    /// <summary>按模式缓存的插件视图(首次 CreateView 后复用;上下文订阅随视图保持稳定)。</summary>
+    private readonly Dictionary<string, object?> _modeViews = new();
+
+    /// <summary>当前模式的插件视图(契约 CreateView 的产物;App DataTemplate 按 VM 类型渲染)。</summary>
+    public object? ModeView
+    {
+        get
+        {
+            var plugin = _pluginHost?.GetPlugin(CurrentMode);
+            if (plugin is null || _pluginContext is null)
+            {
+                return null;
+            }
+
+            if (!_modeViews.TryGetValue(CurrentMode, out var view))
+            {
+                view = plugin.CreateView(_pluginContext);
+                _modeViews[CurrentMode] = view;
+            }
+
+            return view;
+        }
+    }
 
     partial void OnCurrentModeChanged(string value)
     {
-        OnPropertyChanged(nameof(IsExifMode));
-        OnPropertyChanged(nameof(ExifCompare));
+        RefreshModeButtons();
+        OnPropertyChanged(nameof(ModeView));
         _ = SaveSessionAsync();
     }
-
-    public bool IsExifMode => CurrentMode == "exif";
-
-    /// <summary>EXIF 对比模式数据(仅在 exif 模式且槽位非空时非 null)。</summary>
-    public ExifCompareViewModel? ExifCompare => IsExifMode && Slots.Count > 0 ? new ExifCompareViewModel(Slots) : null;
 
     [RelayCommand]
     private void SetMode(string mode) => CurrentMode = mode;
@@ -120,12 +246,19 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>会话恢复时还原提交选项。</summary>
     private void RestoreCommitOptions(CommitOptions options) => CommitOptions = options;
 
-    /// <summary>会话恢复时还原模式。</summary>
+    /// <summary>会话恢复时还原模式(兼容 M2 短 id 与 M3 插件 id)。</summary>
     private void RestoreMode(string? mode)
     {
-        if (mode is "jpeg" or "exif")
+        var normalized = mode switch
         {
-            CurrentMode = mode;
+            "jpeg" => "builtin.jpeg",
+            "exif" => "builtin.exif",
+            _ => mode,
+        };
+
+        if (normalized is not null && _pluginHost!.GetPlugin(normalized) is not null)
+        {
+            CurrentMode = normalized;
         }
     }
 
@@ -198,8 +331,7 @@ public partial class MainViewModel : ViewModelBase
         {
             _thumbnails?.Dispose();
             _thumbnails = new ThumbnailService();
-            Cards.Clear();
-            Slots.Clear();
+            await EnsurePluginHostAsync();
             CurrentDirectory = directory;
 
             // M0: 一次性同步扫描;M1 换 IAsyncEnumerable 分批渲染(02 §5)
@@ -214,7 +346,7 @@ public partial class MainViewModel : ViewModelBase
 
             Greeting = pairs.Count == 0 ? "目录中没有找到照片" : $"已加载 {pairs.Count} 张";
             OnPropertyChanged(nameof(StatusText));
-            var restored = TryRestoreSession(pairs);
+            var restored = TryRestoreSession(directory, pairs);
             ApplySlots(restored, saveSession: false);
             SlotsReplaced?.Invoke(this, EventArgs.Empty);
             _ = LoadThumbnailsAsync();
@@ -280,14 +412,13 @@ public partial class MainViewModel : ViewModelBase
             state.Mode = mode;
             state.CommitOptions = StoredCommitOptions.From(CommitOptions);
             SessionStore.Save(state);
-        });
-    }
+        });    }
 
     /// <summary>恢复会话(打开目录时调用;03 F5)。返回恢复出的槽位卡片列表。</summary>
-    private List<PhotoCardViewModel> TryRestoreSession(IReadOnlyList<PhotoPair> pairs)
+    private List<PhotoCardViewModel> TryRestoreSession(string directory, IReadOnlyList<PhotoPair> pairs)
     {
         var restoredSlots = new List<PhotoCardViewModel>();
-        var state = SessionStore.Load(CurrentDirectory!);
+        var state = SessionStore.Load(directory);
         if (state is null)
         {
             return restoredSlots;
@@ -295,7 +426,7 @@ public partial class MainViewModel : ViewModelBase
 
         SessionStore.Apply(state, pairs);
         RestoreMode(state.Mode);
-        RestoreCommitOptions(state.CommitOptions.ToOptions());
+        RestoreCommitOptions(state.CommitOptions?.ToOptions() ?? new CommitOptions());
 
         // 恢复槽位内容(按保存时的顺序)
         foreach (var key in state.SlotOrder.Take(MaxSlots))
@@ -380,4 +511,24 @@ public partial class MainViewModel : ViewModelBase
         var dialog = new Views.CommitDialog(plan, CurrentDirectory);
         await dialog.ShowDialog(window);
     }
+}
+
+/// <summary>模式条按钮的包装 VM:IsChecked 由 CurrentMode 变化统一驱动(而非 ConverterParameter)。</summary>
+public sealed partial class ModeButtonViewModel : ObservableObject
+{
+    public ModeButtonViewModel(CompareModeDescriptor descriptor)
+    {
+        Descriptor = descriptor;
+    }
+
+    public CompareModeDescriptor Descriptor { get; }
+
+    public string Title => Descriptor.Title;
+
+    public string Id => Descriptor.Id;
+
+    [ObservableProperty]
+    private bool _isChecked;
+
+    public void SetChecked(bool value) => IsChecked = value;
 }

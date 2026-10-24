@@ -2,6 +2,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Wuling.App.ViewModels"
         xmlns:app="using:Wuling.App.Views"
+        xmlns:builtin="using:Wuling.Plugins.BuiltIn"
+        xmlns:pa="using:Wuling.Plugins.Abstractions"
+        xmlns:py="using:Wuling.Plugins.Python"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="800"
@@ -82,83 +85,172 @@
                 </ListBox.ItemTemplate>
             </ListBox>
 
-            <!-- 模式条: 独立纤细行(01 §2.2 ModeBar;M2 接入 JPEG/EXIF 两个内置模式,M3 起插件挂载) -->
+            <!-- 模式条: 插件驱动(04 §5 ModeBar = PluginHost.Modes 投影) -->
             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6" Margin="0,4,0,4">
                 <TextBlock Text="对比模式" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,4,0" />
-                <ToggleButton Content="JPEG预览" IsChecked="{Binding IsExifMode, Converter={x:Static BoolConverters.Not}, Mode=OneWay}"
-                              Command="{Binding SetModeCommand}" CommandParameter="jpeg" />
-                <ToggleButton Content="EXIF" IsChecked="{Binding IsExifMode, Mode=OneWay}"
-                              Command="{Binding SetModeCommand}" CommandParameter="exif" />
-                <ToggleButton Content="RAW预览" IsEnabled="False" />
-                <ToggleButton Content="差分" IsEnabled="False" />
+                <ItemsControl ItemsSource="{Binding Modes}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="6" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ModeButtonViewModel">
+                            <ToggleButton Content="{Binding Title}"
+                                          IsChecked="{Binding IsChecked, Mode=OneWay}"
+                                          Command="{Binding $parent[Window].DataContext.SetModeCommand}"
+                                          CommandParameter="{Binding Id}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </StackPanel>
 
-            <!-- 对比区: 模式内容层 + 宿主 chrome 层(标记按钮浮在每个槽右下, 不随模式变化; M3 插件契约中 chrome 归宿主) -->
+            <!-- 对比区: 插件视图容器 + 宿主 chrome 层(标记按钮浮在每个槽右下, 不随模式变化; M3 插件契约中 chrome 归宿主) -->
             <Grid Grid.Row="2">
-                <!-- JPEG 预览模式 -->
-                <ItemsControl x:Name="CompareGrid" ItemsSource="{Binding Slots}" IsVisible="{Binding !IsExifMode}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:PhotoCardViewModel">
-                            <!-- 模式内容: 整格图片 + 文件名/EXIF 摘要浮条(标记按钮在宿主 chrome 层) -->
-                            <Border Margin="2" CornerRadius="8" BorderThickness="1"
-                                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
-                                <Panel>
-                                    <Image Source="{Binding CompareView}" Stretch="Uniform" />
-                                    <Border HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                                            Margin="0,0,0,10" CornerRadius="4" Padding="10,2"
-                                            Background="#99000000">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="{Binding DisplayName}" FontSize="12" Foreground="White" />
-                                            <TextBlock Text="{Binding ExifSummaryText}" FontSize="11" Foreground="#CCFFFFFF"
-                                                       IsVisible="{Binding ExifSummaryText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                                        </StackPanel>
-                                    </Border>
-                                </Panel>
-                            </Border>
+                <!-- 插件内容层: ModeView 由 PluginHost.CreateView 按当前模式产出 -->
+                <ContentControl Content="{Binding ModeView}" IsVisible="{Binding !HasNoSlots}" Focusable="False">
+                    <ContentControl.DataTemplates>
+                        <!-- builtin.jpeg: 图片网格(每格图片 + 文件名/EXIF 摘要浮条) -->
+                        <DataTemplate x:DataType="builtin:JpegPreviewViewModel">
+                            <ItemsControl ItemsSource="{Binding Cards}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="builtin:SlotViewModel">
+                                        <Border Margin="2" CornerRadius="8" BorderThickness="1"
+                                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                                            <Panel>
+                                                <Border CornerRadius="8" Background="#1E1E1E">
+                                                    <TextBlock Text="🖼" FontSize="40" HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center" Opacity="0.3"
+                                                               IsVisible="{Binding Bitmap, Converter={x:Static ObjectConverters.IsNull}}" />
+                                                </Border>
+                                                <Image Source="{Binding Bitmap}" Stretch="Uniform" />
+                                                <TextBlock Text="RAW⇄JPG" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                           Margin="0,6,6,0" Opacity="0.8" Foreground="#CCFFFFFF" IsVisible="{Binding HasRawJpegPair}" />
+                                                <Border HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                                                        Margin="0,0,0,10" CornerRadius="4" Padding="10,2"
+                                                        Background="#99000000">
+                                                    <TextBlock Text="{Binding DisplayName}" FontSize="12" Foreground="White" />
+                                                </Border>
+                                            </Panel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
 
-                <!-- EXIF 对比模式: 每槽一张参数卡(卡头文件名 + 字段行), 差异字段高亮 -->
-                <ItemsControl ItemsSource="{Binding ExifCompare.Cards}" IsVisible="{Binding IsExifMode}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ExifSlotCard">
-                            <Border Margin="2" CornerRadius="8" BorderThickness="1"
-                                    BorderBrush="#44FFFFFF"
-                                    Background="#F2222222">
-                                <ScrollViewer>
-                                    <StackPanel Margin="12,8">
-                                        <TextBlock Text="{Binding FileName}" FontSize="13" FontWeight="SemiBold"
-                                                   Foreground="#FFFFFFFF" Margin="0,0,0,8" />
-                                        <ItemsControl ItemsSource="{Binding Rows}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate x:DataType="vm:ExifFieldRow">
-                                                    <Grid ColumnDefinitions="72,*" Margin="0,3">
-                                                        <TextBlock Text="{Binding Label}" FontSize="12"
-                                                                   Foreground="#99FFFFFF" />
-                                                        <TextBlock Grid.Column="1" Text="{Binding OwnValue}" FontSize="12" TextWrapping="Wrap"
-                                                                   FontFamily="Cascadia Mono,Consolas,monospace"
-                                                                   Foreground="{Binding Differs, Converter={x:Static app:DiffersToBrushConverter.Instance}}" />
-                                                    </Grid>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
-                                </ScrollViewer>
-                            </Border>
+                        <!-- builtin.exif: 每槽一张参数卡(卡头文件名 + 字段行), 差异字段高亮 -->
+                        <DataTemplate x:DataType="builtin:ExifCompareViewModel">
+                            <ItemsControl ItemsSource="{Binding Cards}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="builtin:ExifSlotCard">
+                                        <Border Margin="2" CornerRadius="8" BorderThickness="1"
+                                                BorderBrush="#44FFFFFF"
+                                                Background="#F2222222">
+                                            <ScrollViewer>
+                                                <StackPanel Margin="12,8">
+                                                    <TextBlock Text="{Binding FileName}" FontSize="13" FontWeight="SemiBold"
+                                                               Foreground="#FFFFFFFF" Margin="0,0,0,8" />
+                                                    <ItemsControl ItemsSource="{Binding Rows}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="builtin:ExifFieldRow">
+                                                                <Grid ColumnDefinitions="72,*" Margin="0,3">
+                                                                    <TextBlock Text="{Binding Label}" FontSize="12"
+                                                                               Foreground="#99FFFFFF" />
+                                                                    <TextBlock Grid.Column="1" Text="{Binding OwnValue}" FontSize="12" TextWrapping="Wrap"
+                                                                               FontFamily="Cascadia Mono,Consolas,monospace"
+                                                                               Foreground="{Binding Differs, Converter={x:Static app:DiffersToBrushConverter.Instance}}" />
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </ScrollViewer>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                        <!-- builtin.hello: 每槽文件名 + 来源(双语言契约等价验收) -->
+                        <DataTemplate x:DataType="builtin:HelloViewModel">
+                            <ItemsControl ItemsSource="{Binding Rows}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="builtin:HelloRow">
+                                        <Border Margin="2" CornerRadius="8" BorderThickness="1"
+                                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                                Background="#F2222222">
+                                            <StackPanel Margin="12,8" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Index, StringFormat='槽 {0}'}" FontSize="11" Foreground="#99FFFFFF" />
+                                                <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold"
+                                                           Foreground="#FFFFFFFF" Margin="0,4,0,8" />
+                                                <TextBlock Text="{Binding Source}" FontSize="12" Foreground="#CCFFFFFF" />
+                                                <TextBlock Text="{Binding Tag}" FontSize="11" Foreground="#99FFFFFF" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </DataTemplate>
+
+                        <!-- Python 插件: 声明式视图树渲染(image 引用路径;stack/row/kv/text) -->
+                        <DataTemplate x:DataType="py:PythonViewEnvelope">
+                            <ItemsControl ItemsSource="{Binding Cards}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="py:PythonSlotView">
+                                        <Border Margin="2" CornerRadius="8" BorderThickness="1"
+                                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                                            <Panel>
+                                                <!-- 解码失败/无图占位 -->
+                                                <Border CornerRadius="8" Background="#1E1E1E">
+                                                    <TextBlock Text="🐍" FontSize="40" HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center" Opacity="0.3"
+                                                               IsVisible="{Binding PreviewBitmap, Converter={x:Static ObjectConverters.IsNull}}" />
+                                                </Border>
+                                                <Image Source="{Binding PreviewBitmap}" Stretch="Uniform" />
+                                                <!-- 文字浮条: 深底白字, 浅色主题下也可读 -->
+                                                <Border VerticalAlignment="Bottom" Margin="8" CornerRadius="4" Padding="10,6"
+                                                        Background="#99000000">
+                                                    <StackPanel Spacing="4">
+                                                        <TextBlock Text="{Binding DisplayName}" FontSize="13" FontWeight="SemiBold" Foreground="White" />
+                                                        <ItemsControl ItemsSource="{Binding KvPairs}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="py:PythonKvPair">
+                                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                        <TextBlock Text="{Binding Key}" FontSize="11" Foreground="#99FFFFFF" />
+                                                                        <TextBlock Text="{Binding Value}" FontSize="11" Foreground="#E6FFFFFF" />
+                                                                    </StackPanel>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </Border>
+                                            </Panel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </DataTemplate>
+                    </ContentControl.DataTemplates>
+                </ContentControl>
 
                 <!-- 宿主 chrome 层: 标记按钮浮在每个槽右下角, 覆盖所有模式(M3 插件契约中 chrome 归宿主);
                      用与内容层相同的 UniformGrid 保证对齐; 激活态由 MarkToBrushConverter 按 Tag 声明式驱动 -->

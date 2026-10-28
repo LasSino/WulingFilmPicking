@@ -71,18 +71,6 @@ public sealed class BadgeBrushConverter : Avalonia.Data.Converters.IValueConvert
         => throw new NotSupportedException();
 }
 
-/// <summary>模式条激活态: 当前模式 id 等于 Descriptor.Id → 选中。</summary>
-public sealed class ModeIdEqualsConverter : Avalonia.Data.Converters.IValueConverter
-{
-    public static readonly ModeIdEqualsConverter Instance = new();
-
-    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => value is string current && parameter is string id && current == id;
-
-    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => throw new NotSupportedException();
-}
-
 /// <summary>槽位数 → UniformGrid 列数(与主 VM Columns 同规则, 供插件视图内绑定)。</summary>
 public sealed class SlotCountToColumnsConverter : Avalonia.Data.Converters.IValueConverter
 {

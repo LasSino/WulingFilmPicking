@@ -41,6 +41,10 @@ public sealed record ExifInfo
     public string? Shutter { get; init; }
     public string? Iso { get; init; }
     public string? ExposureBias { get; init; }
+
+    /// <summary>对焦模式(03 F6;厂商 MakerNote 扫描, 不可得 null)。</summary>
+    public string? FocusMode { get; init; }
+
     public DateTimeOffset? TakenAt { get; init; }
 
     /// <summary>摘要行(如 "f/4 1/250 ISO400")。</summary>

@@ -27,6 +27,8 @@ public sealed class PythonWorkerConnection : IDisposable
     private Process? _process;
     private Task? _readerTask;
     private Task? _writerTask;
+    private Task? _stderrTask;
+    private readonly ConcurrentQueue<string> _stderrLines = new();
     private int _nextId;
     private int _timeoutStreak;
 
@@ -64,6 +66,19 @@ public sealed class PythonWorkerConnection : IDisposable
         _process = Process.Start(psi) ?? throw new InvalidOperationException("failed to start python worker");
         _readerTask = Task.Run(() => ReadLoopAsync(_process.StandardOutput));
         _writerTask = Task.Run(() => WriteLoopAsync(_process.StandardInput));
+        // stderr 排水(04 §4.6.6): 不排会写满管道缓冲死锁 Worker → 假性 3 次超时禁用
+        _stderrTask = Task.Run(async () =>
+        {
+            while (await _process!.StandardError.ReadLineAsync() is { } line && line.Length > 0)
+            {
+                Debug.WriteLine($"[wuling-worker] {line}");
+                _stderrLines.Enqueue(line);
+                if (_stderrLines.Count > 100)
+                {
+                    _stderrLines.TryDequeue(out _);
+                }
+            }
+        });
 
         // Worker 启动即发 ready 通知; 这里以 initialize 探活代替等待
         await SendRequestAsync("initialize", new { plugins = Array.Empty<object>() }, cancellationToken);
@@ -77,20 +92,27 @@ public sealed class PythonWorkerConnection : IDisposable
         return result;
     }
 
-    /// <summary>渲染: 传入槽位, 返回声明式视图树 (JsonElement)。</summary>
-    public async Task<JsonElement> RenderAsync(string modeId, IReadOnlyList<PhotoCard> slots, CancellationToken cancellationToken = default)
+    /// <summary>渲染: 传入槽位与数据提示(04 §4 datahints), 返回声明式视图树 (JsonElement)。</summary>
+    public async Task<JsonElement> RenderAsync(string modeId, IReadOnlyList<PhotoCard> slots,
+        Func<PhotoCard, object>? dataHints = null, CancellationToken cancellationToken = default)
     {
         var payload = new
         {
             mode = modeId,
-            slots = slots.Select(s => new
+            slots = slots.Select(s =>
             {
-                display_name = s.DisplayName,
-                preview_path = s.PreviewPath,
-                raw_path = s.RawPath,
-                jpeg_path = s.JpegPath,
-                has_raw = s.HasRawJpegPair,
-                tag = s.Tag.ToString().ToLowerInvariant(),
+                var hints = dataHints?.Invoke(s);
+                return new Dictionary<string, object?>
+                {
+                    ["display_name"] = s.DisplayName,
+                    ["preview_path"] = s.PreviewPath,
+                    ["raw_path"] = s.RawPath,
+                    ["jpeg_path"] = s.JpegPath,
+                    ["has_raw"] = s.HasRawJpegPair,
+                    ["tag"] = s.Tag.ToString().ToLowerInvariant(),
+                    // datahints: 小数值数组内联(04 §3 通道③);直方图 256bin×3 ≈ 3KB
+                    ["datahints"] = hints,
+                };
             }).ToList(),
         };
         var result = await SendRequestAsync("render", payload, cancellationToken, RenderTimeoutMs);

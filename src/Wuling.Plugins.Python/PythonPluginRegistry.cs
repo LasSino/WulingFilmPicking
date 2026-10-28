@@ -117,6 +117,10 @@ public sealed class PythonPluginRegistry : IDisposable
                     MaxSlots = json.TryGetProperty("maxSlots", out var mx) ? mx.GetInt32() : 9,
                     Kind = PluginKind.Python,
                     IsBuiltIn = false,
+                    // datahints 能力声明(04 §3 通道③): histogram → 宿主内联直方图数据
+                    Capabilities = json.TryGetProperty("capabilities", out var caps) && caps.ValueKind == JsonValueKind.Array
+                        ? caps.EnumerateArray().Select(c => c.GetString() ?? "").Where(s => s.Length > 0).ToList()
+                        : null,
                 }));
         }
 

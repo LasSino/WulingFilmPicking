@@ -1,8 +1,0 @@
-{
-  "api": 1,
-  "id": "py.hello",
-  "title": "Hello (Python)",
-  "minSlots": 1,
-  "maxSlots": 9,
-  "entry": "main:WulingPlugin"
-}

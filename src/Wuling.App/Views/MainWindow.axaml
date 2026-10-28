@@ -132,9 +132,54 @@
                                                 <TextBlock Text="RAW⇄JPG" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Top"
                                                            Margin="0,6,6,0" Opacity="0.8" Foreground="#CCFFFFFF" IsVisible="{Binding HasRawJpegPair}" />
                                                 <Border HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                                                        Margin="0,0,0,10" CornerRadius="4" Padding="10,2"
+                                                        Margin="0,0,0,10" CornerRadius="4" Padding="10,4"
                                                         Background="#99000000">
-                                                    <TextBlock Text="{Binding DisplayName}" FontSize="12" Foreground="White" />
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding DisplayName}" FontSize="12" Foreground="White" />
+                                                        <TextBlock Text="{Binding SummaryText}" FontSize="10" Foreground="#CCFFFFFF"
+                                                                   IsVisible="{Binding SummaryText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </Panel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </DataTemplate>
+
+                        <!-- builtin.raw: RAW 内嵌预览(格式/内嵌尺寸/大小摘要;无内嵌显示占位) -->
+                        <DataTemplate x:DataType="builtin:RawPreviewViewModel">
+                            <ItemsControl ItemsSource="{Binding Cards}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="builtin:RawSlotViewModel">
+                                        <Border Margin="2" CornerRadius="8" BorderThickness="1"
+                                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                                            <Panel>
+                                                <Border CornerRadius="8" Background="#1E1E1E">
+                                                    <TextBlock Text="🅡" FontSize="40" HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center" Opacity="0.3"
+                                                               IsVisible="{Binding IsBitmapReady, Converter={x:Static BoolConverters.Not}}" />
+                                                </Border>
+                                                <Image Source="{Binding Bitmap}" Stretch="Uniform"
+                                                       IsVisible="{Binding IsBitmapReady}" />
+                                                <Border HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                        Margin="0,6,6,0" Padding="4,1" CornerRadius="2"
+                                                        Background="#CC000000">
+                                                    <TextBlock Text="RAW" FontSize="9" FontWeight="SemiBold" Foreground="#FFE0A030" />
+                                                </Border>
+                                                <Border HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                                                        Margin="0,0,0,10" CornerRadius="4" Padding="10,4"
+                                                        Background="#99000000">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding DisplayName}" FontSize="12" Foreground="White" />
+                                                        <TextBlock Text="{Binding SummaryText}" FontSize="10" Foreground="#CCFFFFFF"
+                                                                   IsVisible="{Binding SummaryText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                    </StackPanel>
                                                 </Border>
                                             </Panel>
                                         </Border>
@@ -180,31 +225,6 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </DataTemplate>
-                        <!-- builtin.hello: 每槽文件名 + 来源(双语言契约等价验收) -->
-                        <DataTemplate x:DataType="builtin:HelloViewModel">
-                            <ItemsControl ItemsSource="{Binding Rows}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <UniformGrid Columns="{Binding $parent[Window].DataContext.Columns}" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="builtin:HelloRow">
-                                        <Border Margin="2" CornerRadius="8" BorderThickness="1"
-                                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
-                                                Background="#F2222222">
-                                            <StackPanel Margin="12,8" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Index, StringFormat='槽 {0}'}" FontSize="11" Foreground="#99FFFFFF" />
-                                                <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold"
-                                                           Foreground="#FFFFFFFF" Margin="0,4,0,8" />
-                                                <TextBlock Text="{Binding Source}" FontSize="12" Foreground="#CCFFFFFF" />
-                                                <TextBlock Text="{Binding Tag}" FontSize="11" Foreground="#99FFFFFF" />
-                                            </StackPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </DataTemplate>
 
                         <!-- Python 插件: 声明式视图树渲染(image 引用路径;stack/row/kv/text) -->
                         <DataTemplate x:DataType="py:PythonViewEnvelope">
@@ -217,15 +237,22 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="py:PythonSlotView">
                                         <Border Margin="2" CornerRadius="8" BorderThickness="1"
-                                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                                Background="#1E1E1E">
                                             <Panel>
-                                                <!-- 解码失败/无图占位 -->
-                                                <Border CornerRadius="8" Background="#1E1E1E">
-                                                    <TextBlock Text="🐍" FontSize="40" HorizontalAlignment="Center"
-                                                               VerticalAlignment="Center" Opacity="0.3"
-                                                               IsVisible="{Binding PreviewBitmap, Converter={x:Static ObjectConverters.IsNull}}" />
-                                                </Border>
-                                                <Image Source="{Binding PreviewBitmap}" Stretch="Uniform" />
+                                                <!-- 直方图模式: 深底曲线绘制(有 histogram 数据时显示) -->
+                                                <app:HistogramChart Histogram="{Binding Histogram}"
+                                                                    IsVisible="{Binding HasHistogram}" />
+                                                <!-- 图片模式: 预览图 -->
+                                                <Panel IsVisible="{Binding !HasHistogram}">
+                                                    <!-- 解码失败/无图占位 -->
+                                                    <Border CornerRadius="8" Background="#1E1E1E">
+                                                        <TextBlock Text="🐍" FontSize="40" HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center" Opacity="0.3"
+                                                                   IsVisible="{Binding PreviewBitmap, Converter={x:Static ObjectConverters.IsNull}}" />
+                                                    </Border>
+                                                    <Image Source="{Binding PreviewBitmap}" Stretch="Uniform" />
+                                                </Panel>
                                                 <!-- 文字浮条: 深底白字, 浅色主题下也可读 -->
                                                 <Border VerticalAlignment="Bottom" Margin="8" CornerRadius="4" Padding="10,6"
                                                         Background="#99000000">

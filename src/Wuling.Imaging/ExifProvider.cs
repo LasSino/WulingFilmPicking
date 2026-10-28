@@ -17,6 +17,10 @@ public sealed record ExifSummary
     public string? Shutter { get; init; }
     public string? Iso { get; init; }
     public string? ExposureBias { get; init; }
+
+    /// <summary>对焦模式(03 F6;厂商优先 EXIF FlashPixVersion 下 AF 字段, 回退 MeteringMode 不可得时为 null)。</summary>
+    public string? FocusMode { get; init; }
+
     public DateTimeOffset? TakenAt { get; init; }
 
     /// <summary>摘要行(槽位信息条,如 "f/4 1/250 ISO400")。</summary>
@@ -133,6 +137,9 @@ public sealed class ExifProvider
                 lens = subIfd.GetString(ExifDirectoryBase.TagLensModel);
             }
 
+            // 对焦模式: 无跨厂商标准 tag;取各厂商 AF 字段(MakerNote)常见落点, 不可得为 null
+            var focus = ReadFocusMode(directories);
+
             return new ExifSummary
             {
                 Orientation = orientation is >= 1 and <= 8 ? orientation : (ushort)1,
@@ -144,6 +151,7 @@ public sealed class ExifProvider
                 Shutter = shutter,
                 Iso = iso,
                 ExposureBias = bias,
+                FocusMode = focus,
                 TakenAt = taken,
             };
         }
@@ -154,4 +162,31 @@ public sealed class ExifProvider
     }
 
     private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    /// <summary>对焦模式: 厂商 MakerNote 无统一 tag, 扫描已知 AF 相关 tag 名(佳能/索尼/富士/尼康常见值)。</summary>
+    private static string? ReadFocusMode(IEnumerable<MetadataExtractor.Directory> directories)
+    {
+        foreach (var dir in directories)
+        {
+            foreach (var tag in dir.Tags)
+            {
+                var name = tag.Name;
+                var isFocusTag = name.Contains("FocusMode", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("AFFocusMode", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("FocusSetting", StringComparison.OrdinalIgnoreCase);
+                if (!isFocusTag)
+                {
+                    continue;
+                }
+
+                var desc = tag.Description;
+                if (!string.IsNullOrWhiteSpace(desc) && desc.Length <= 40)
+                {
+                    return desc.Trim();
+                }
+            }
+        }
+
+        return null;
+    }
 }

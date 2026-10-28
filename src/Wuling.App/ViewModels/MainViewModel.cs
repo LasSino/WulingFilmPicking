@@ -38,8 +38,8 @@ public partial class MainViewModel : ViewModelBase
 
         _pluginHost = new Wuling.Plugins.PluginHost(() => new Wuling.Plugins.PluginServicesBridge(_exif, _thumbnails!));
         await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.JpegPreviewPlugin());
+        await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.RawPreviewPlugin());
         await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.ExifComparePlugin());
-        await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.HelloPlugin());
 
         // Python 插件发现(04 §5): plugins/python/*/plugin.json; 解释器不可用则静默跳过
         var pythonExe = FindPythonInterpreter();
@@ -233,7 +233,18 @@ public partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void SetMode(string mode) => CurrentMode = mode;
+    private void SetMode(string mode)
+    {
+        if (CurrentMode == mode)
+        {
+            // 重复点击同一模式: CurrentMode 不变不会触发 OnCurrentModeChanged,
+            // 但 ToggleButton 本地视觉态已被翻转为 false —— 显式刷新回弹选中态(单选锁定)。
+            RefreshModeButtons();
+            return;
+        }
+
+        CurrentMode = mode;
+    }
     /// <summary>提交选项(默认: 废弃=软删除;由设置对话框修改后持久化)。</summary>
     public CommitOptions CommitOptions { get; private set; } = new();
 
@@ -336,6 +347,13 @@ public partial class MainViewModel : ViewModelBase
 
             // M0: 一次性同步扫描;M1 换 IAsyncEnumerable 分批渲染(02 §5)
             var pairs = await Task.Run(() => _scanner.Scan(directory));
+            // 切换目录: 清空上一目录的卡片与选中态(此前只 Add 不 Clear, 导致列表/状态栏不更新)
+            foreach (var old in Cards)
+            {
+                old.PropertyChanged -= CardOnPropertyChanged;
+            }
+
+            Cards.Clear();
             foreach (var pair in pairs)
             {
                 var card = new PhotoCardViewModel(pair);

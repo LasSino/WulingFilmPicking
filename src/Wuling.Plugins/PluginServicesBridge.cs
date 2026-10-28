@@ -75,6 +75,67 @@ public sealed class PluginServicesBridge : IPluginServices
         Directory.CreateDirectory(dir);
         return dir;
     }
+
+    public FileMetaInfo GetFileMeta(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return new FileMetaInfo { Length = 0 };
+        }
+
+        var info = new FileInfo(path);
+        if (!RawPreviewExtractor.IsRawExtension(path))
+        {
+            // JPEG/普通图片: 只读文件头解析尺寸(不解码像素)
+            var (w, h) = RawPreviewExtractor.ProbeJpegSize(path);
+            return new FileMetaInfo { PixelWidth = w, PixelHeight = h, Length = info.Length };
+        }
+
+        var raw = RawPreviewExtractor.Extract(path);
+        return new FileMetaInfo
+        {
+            Length = info.Length,
+            RawFormat = RawPreviewExtractor.FormatName(path),
+            EmbeddedPreviewWidth = raw.Width,
+            EmbeddedPreviewHeight = raw.Height,
+        };
+    }
+
+    public byte[]? GetRawPreviewPng(string rawPath)
+    {
+        if (!File.Exists(rawPath) || !RawPreviewExtractor.IsRawExtension(rawPath))
+        {
+            return null;
+        }
+
+        var extracted = RawPreviewExtractor.Extract(rawPath);
+        if (extracted.JpegBytes is null)
+        {
+            return null;
+        }
+
+        // 内嵌 JPEG 解码 → 按 RAW 主文件 EXIF 方向旋转 → PNG 编码
+        using var sk = SkiaSharp.SKBitmap.Decode(extracted.JpegBytes);
+        if (sk is null)
+        {
+            return null;
+        }
+
+        ushort orientation;
+        try
+        {
+            orientation = _exif.GetSummary(rawPath).Orientation;
+        }
+        catch (Exception)
+        {
+            orientation = 1;
+        }
+
+        using var oriented = ThumbnailService.ApplyOrientation(sk, orientation);
+        using var img = SkiaSharp.SKImage.FromBitmap(oriented);
+        using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
 }
 
 /// <summary>直方图计算(256 bin, 基于 Bgra8888 像素;跳过 alpha=0 像素)。</summary>

@@ -21,6 +21,7 @@ class SlotView:
         has_raw: bool,
         tag: str,
         index: int,
+        datahints: dict[str, Any] | None = None,
     ) -> None:
         self.display_name = display_name
         self.preview_path = preview_path
@@ -29,6 +30,8 @@ class SlotView:
         self.has_raw = has_raw
         self.tag = tag
         self.index = index
+        #: 宿主随请求内联的小数值数据(04 §3 通道③): histogram = {"r":[...], "g":[...], "b":[...]}
+        self.datahints: dict[str, Any] = datahints or {}
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<SlotView {self.display_name} tag={self.tag}>"

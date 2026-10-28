@@ -31,4 +31,42 @@ internal static class PluginUtil
             ? $"{e.CameraMake} {e.CameraModel}"
             : e.CameraModel)
         : null;
+
+    /// <summary>文件大小人类可读格式(JPEG/RAW 摘要行共用)。</summary>
+    public static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1 << 20 => $"{bytes / 1048576.0:0.#} MB",
+        >= 1 << 10 => $"{bytes / 1024.0:0} KB",
+        _ => $"{bytes} B",
+    };
+
+    /// <summary>
+    /// 宿主解码像素(Bgra8888 Premul) → Avalonia 位图。
+    /// WriteableBitmap 拷贝构造在 ctor 内完成, 钉住期间拷贝即安全(同 App 侧 PhotoCardViewModel.ToBitmap 模式)。
+    /// 像素不完整/解码失败返回 null(视图层显示占位符)。
+    /// </summary>
+    public static Avalonia.Media.Imaging.Bitmap? ToBitmap(Abstractions.DecodedPixels pixels)
+    {
+        if (pixels.Width <= 0 || pixels.Height <= 0 || pixels.Pixels.Length < pixels.Stride * pixels.Height)
+        {
+            return null;
+        }
+
+        var handle = System.Runtime.InteropServices.GCHandle.Alloc(
+            pixels.Pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            return new Avalonia.Media.Imaging.WriteableBitmap(
+                Avalonia.Platform.PixelFormats.Bgra8888,
+                Avalonia.Platform.AlphaFormat.Premul,
+                handle.AddrOfPinnedObject(),
+                new Avalonia.PixelSize(pixels.Width, pixels.Height),
+                new Avalonia.Vector(96, 96),
+                pixels.Stride);
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
 }

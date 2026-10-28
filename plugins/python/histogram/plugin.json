@@ -1,0 +1,9 @@
+{
+  "api": 1,
+  "id": "py.histogram",
+  "title": "色彩直方图",
+  "minSlots": 1,
+  "maxSlots": 9,
+  "entry": "main:WulingPlugin",
+  "capabilities": ["histogram"]
+}

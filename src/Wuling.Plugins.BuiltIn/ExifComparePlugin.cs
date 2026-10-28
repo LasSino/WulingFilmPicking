@@ -38,7 +38,7 @@ public sealed class ExifCompareViewModel : System.ComponentModel.INotifyProperty
 {
     private static readonly string[] FieldLabels =
     [
-        "机身", "镜头", "焦距", "光圈", "快门", "ISO", "曝光补偿", "拍摄时间",
+        "机身", "镜头", "焦距", "光圈", "快门", "ISO", "曝光补偿", "对焦模式", "拍摄时间",
     ];
 
     public ExifCompareViewModel(ICompareContext context, IPluginServices services)
@@ -71,6 +71,7 @@ public sealed class ExifCompareViewModel : System.ComponentModel.INotifyProperty
             new string?[slots.Count], // 快门
             new string?[slots.Count], // ISO
             new string?[slots.Count], // 曝光补偿
+            new string?[slots.Count], // 对焦模式
             new string?[slots.Count], // 拍摄时间
         ];
 
@@ -83,7 +84,8 @@ public sealed class ExifCompareViewModel : System.ComponentModel.INotifyProperty
             values[4][i] = exifs[i].Shutter;
             values[5][i] = exifs[i].Iso;
             values[6][i] = exifs[i].ExposureBias;
-            values[7][i] = exifs[i].TakenAt?.LocalDateTime.ToString("HH:mm:ss.fff");
+            values[7][i] = exifs[i].FocusMode;
+            values[8][i] = exifs[i].TakenAt?.LocalDateTime.ToString("HH:mm:ss.fff");
         }
 
         var cards = new List<ExifSlotCard>(slots.Count);

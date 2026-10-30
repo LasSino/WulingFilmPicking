@@ -7,9 +7,14 @@
         Title="完成并处理" Width="520" Height="420" CanResize="False"
         WindowStartupLocation="CenterOwner">
 
-    <Grid RowDefinitions="*,Auto,Auto,Auto" Margin="16">
+    <!-- 行布局: 标题 Auto / 摘要 * / 按钮 Auto / 进度 Auto。
+         摘要必须在 * 行内滚动 —— 放 Auto 行时长列表(几十个文件)会把窗口撑高、
+         按钮顶出屏幕不可点(2026-10-31 bug)。
+         注意: Avalonia 12 的 TextBox 没有 ScrollBarVisibility 属性(WPF 才有, MC3072),
+         其模板自带 ScrollViewer, 多行内容默认即可滚动。 -->
+    <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="16">
         <TextBlock Text="提交确认 — 将执行以下动作:" FontWeight="SemiBold" Margin="0,0,0,8" />
-        <TextBox Grid.Row="1" x:Name="SummaryBox" IsReadOnly="True" MinHeight="200"
+        <TextBox Grid.Row="1" x:Name="SummaryBox" IsReadOnly="True" MinHeight="160"
                  FontFamily="Cascadia Mono,Consolas,monospace" TextWrapping="NoWrap" AcceptsReturn="True" />
         <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
             <Button x:Name="OkButton" Content="执行" Click="OnExecute" FontWeight="SemiBold" />

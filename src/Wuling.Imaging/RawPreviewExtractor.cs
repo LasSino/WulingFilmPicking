@@ -232,17 +232,21 @@ public static class RawPreviewExtractor
     private static RawPreviewResult ExtractRaf(string path)
     {
         using var fs = File.OpenRead(path);
-        Span<byte> header = stackalloc byte[84];
+        Span<byte> header = stackalloc byte[0x70];
         if (!ReadExact(fs, 0, header))
         {
             return new RawPreviewResult();
         }
 
-        // RAF 头: "FUJIFILMCCD-RAW ..." 后 4 组 u32 偏移
-        // [0x54] jpegThumbStart? 布局: 0x54=objectData... 实测字段(社区逆向与 MetadataExtractor 一致):
-        //   0x54: CFA 头起点, 0x58: CFA 长度, 0x5C: PreviewImageStart(全尺寸 JPEG), 0x60: PreviewImageLength
-        var previewStart = BinaryPrimitives.ReadUInt32BigEndian(header[0x5C..]);
-        var previewLen = BinaryPrimitives.ReadUInt32BigEndian(header[0x60..]);
+        // RAF 头: "FUJIFILMCCD-RAW ..." 后为若干组大端 u32 字段。
+        // 2026-10-31 探针实锤(X-T20, DSCF7264.RAF 25113248B)与 MetadataExtractor 布局一致:
+        //   0x54: 内嵌 JPEG(全尺寸预览)起点   —— 148 = SOI@0x94, 尾部恰为 FFD9;
+        //   0x58: 内嵌 JPEG 长度              —— 631124;
+        //   0x5C: CFA 头起点/0x60: CFA 头长度(指向 TIFF IFD 元数据, 不是 JPEG);
+        //   0x64: CFA 数据起点/0x68: CFA 数据长度(653824+24459424=文件大小, 严丝合缝)。
+        // 注意旧版误把 0x5C/0x60 当预览字段, 且 stackalloc 84B 覆盖不到 0x60 直接越界。
+        var previewStart = BinaryPrimitives.ReadUInt32BigEndian(header[0x54..]);
+        var previewLen = BinaryPrimitives.ReadUInt32BigEndian(header[0x58..]);
         if (previewStart <= 0 || previewLen <= 0 || previewStart + previewLen > fs.Length)
         {
             return new RawPreviewResult();

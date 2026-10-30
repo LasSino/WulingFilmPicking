@@ -25,6 +25,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly DirectoryScanner _scanner = new();
     private readonly ExifProvider _exif = new();
     private ThumbnailService? _thumbnails;
+    private Wuling.Plugins.PluginServicesBridge? _servicesBridge; // 单例服务桥: 切目录 SwapThumbnails 原子换底层
     private Wuling.Plugins.PluginHost? _pluginHost;
     private Wuling.Plugins.CompareContext? _pluginContext;
 
@@ -33,10 +34,13 @@ public partial class MainViewModel : ViewModelBase
     {
         if (_pluginHost is not null)
         {
+            // 切目录: 底层 ThumbnailService 已重建, 原子同步给插件侧服务桥(插件无感)。
+            _servicesBridge!.SwapThumbnails(_thumbnails!);
             return;
         }
 
-        _pluginHost = new Wuling.Plugins.PluginHost(() => new Wuling.Plugins.PluginServicesBridge(_exif, _thumbnails!));
+        _servicesBridge = new Wuling.Plugins.PluginServicesBridge(_exif, _thumbnails!);
+        _pluginHost = new Wuling.Plugins.PluginHost(() => _servicesBridge);
         await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.JpegPreviewPlugin());
         await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.RawPreviewPlugin());
         await _pluginHost.RegisterAsync(new Wuling.Plugins.BuiltIn.ExifComparePlugin());
@@ -354,6 +358,16 @@ public partial class MainViewModel : ViewModelBase
             }
 
             Cards.Clear();
+
+            // 会话标记先回放到 pairs, 再构造卡片 —— 卡片 ctor 捕获 pair.Tag 作为初值;
+            // 若后回放(Apply 只改 Pair.Tag 模型), 卡片 VM 与 UI 徽点全部停留在未标记,
+            // 但提交仍按 Pair 处理 → "标记在、界面不显示"(2026-10-31 bug 实锤)。
+            var restoredState = SessionStore.Load(directory);
+            if (restoredState is not null)
+            {
+                SessionStore.Apply(restoredState, pairs);
+            }
+
             foreach (var pair in pairs)
             {
                 var card = new PhotoCardViewModel(pair);
@@ -364,7 +378,7 @@ public partial class MainViewModel : ViewModelBase
 
             Greeting = pairs.Count == 0 ? "目录中没有找到照片" : $"已加载 {pairs.Count} 张";
             OnPropertyChanged(nameof(StatusText));
-            var restored = TryRestoreSession(directory, pairs);
+            var restored = TryRestoreSession(directory, pairs, restoredState);
             ApplySlots(restored, saveSession: false);
             SlotsReplaced?.Invoke(this, EventArgs.Empty);
             _ = LoadThumbnailsAsync();
@@ -432,11 +446,11 @@ public partial class MainViewModel : ViewModelBase
             SessionStore.Save(state);
         });    }
 
-    /// <summary>恢复会话(打开目录时调用;03 F5)。返回恢复出的槽位卡片列表。</summary>
-    private List<PhotoCardViewModel> TryRestoreSession(string directory, IReadOnlyList<PhotoPair> pairs)
+    /// <summary>恢复会话(打开目录时调用;03 F5)。返回恢复出的槽位卡片列表。preloaded=调用方已读过并回放过标记的状态。</summary>
+    private List<PhotoCardViewModel> TryRestoreSession(string directory, IReadOnlyList<PhotoPair> pairs, SessionState? preloaded = null)
     {
         var restoredSlots = new List<PhotoCardViewModel>();
-        var state = SessionStore.Load(directory);
+        var state = preloaded ?? SessionStore.Load(directory);
         if (state is null)
         {
             return restoredSlots;
@@ -528,6 +542,43 @@ public partial class MainViewModel : ViewModelBase
         var plan = await Task.Run(() => CommitPlanner.Build(Cards.Select(c => c.Pair), CommitOptions));
         var dialog = new Views.CommitDialog(plan, CurrentDirectory);
         await dialog.ShowDialog(window);
+
+        // 执行过且有关键成果 → 从界面移除已处置文件(列表/槽位/插件上下文/会话),
+        // 防止: 二次提交重复处置已删除文件(必失败)、点击已删除图各模式加载空转(2026-10-31 bug)。
+        if (dialog.Result is { } result && result.SuccessCount > 0)
+        {
+            ApplyCommitResult(result);
+        }
+    }
+
+    /// <summary>
+    /// 提交执行后清理: 移除所有至少成功处置了一个文件的 Pair 对应卡片。
+    /// 槽位同步 ApplySlots 管线(插件上下文一并刷新), 会话重新保存(已处置项出标签表)。
+    /// </summary>
+    private void ApplyCommitResult(Wuling.Core.Commit.CommitResult result)
+    {
+        // 提交计划以文件为单位(RAW+JPEG 对同处置), 按 Pair 归并成功项
+        var processedPairs = result.Results
+            .Where(r => r.Success)
+            .Select(r => r.Item.Pair)
+            .Distinct()
+            .ToHashSet();
+
+        // 1) 浏览条: 移除已处置卡片(退订 PropertyChanged, 防泄漏)
+        var removedCards = Cards.Where(c => processedPairs.Contains(c.Pair)).ToList();
+        foreach (var card in removedCards)
+        {
+            card.PropertyChanged -= CardOnPropertyChanged;
+            Cards.Remove(card);
+        }
+
+        // 2) 槽位: 剩余槽位卡片重走 ApplySlots(上下文/插件/持久化同一路径)
+        var remainingSlots = Slots.Where(s => !processedPairs.Contains(s.Pair)).ToList();
+        ApplySlots(remainingSlots, saveSession: true);
+        SlotsReplaced?.Invoke(this, EventArgs.Empty); // 浏览条选中态同步剔除已处置卡片
+
+        Greeting = $"已处置 {removedCards.Count} 张, 剩余 {Cards.Count} 张";
+        OnPropertyChanged(nameof(StatusText));
     }
 }
 
@@ -548,5 +599,20 @@ public sealed partial class ModeButtonViewModel : ObservableObject
     [ObservableProperty]
     private bool _isChecked;
 
-    public void SetChecked(bool value) => IsChecked = value;
+    /// <summary>
+    /// 设置选中态并确保 UI 回推:值未变也要强制通知 —— 同模式重复点击时 ToggleButton
+    /// 本地视觉态已被翻转为 false,但 VM 值仍是 true,ObservableObject 对同值赋值
+    /// 不发 PropertyChanged → OneWay 绑定不回推 → 高亮丢失(bug 实锤 2026-10-31)。
+    /// </summary>
+    public void SetChecked(bool value)
+    {
+        if (IsChecked != value)
+        {
+            IsChecked = value;
+        }
+        else
+        {
+            OnPropertyChanged(nameof(IsChecked)); // 同值强制回推, 纠正控件本地翻转
+        }
+    }
 }

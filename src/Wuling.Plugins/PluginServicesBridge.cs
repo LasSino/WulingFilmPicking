@@ -8,17 +8,23 @@ namespace Wuling.Plugins;
 /// <summary>
 /// IPluginServices 宿主实现: 桥接 Wuling.Imaging 的 ExifProvider / ThumbnailService。
 /// 全部线程安全(底层服务本就并发安全)。
+/// 底层 ThumbnailService 可替换(SwapThumbnails): 切目录时宿主重建服务,
+/// 插件持有的桥自动指向新实例 —— 不再踩已 Dispose 的旧服务(2026-10-31)。
 /// </summary>
 public sealed class PluginServicesBridge : IPluginServices
 {
     private readonly ExifProvider _exif;
-    private readonly ThumbnailService _thumbnails;
+    private ThumbnailService _thumbnails;
 
     public PluginServicesBridge(ExifProvider exif, ThumbnailService thumbnails)
     {
         _exif = exif;
         _thumbnails = thumbnails;
     }
+
+    /// <summary>切目录后由宿主调用: 原子替换底层服务(插件无感)。</summary>
+    public void SwapThumbnails(ThumbnailService thumbnails) =>
+        System.Threading.Volatile.Write(ref _thumbnails, thumbnails);
 
     public ExifInfo GetExif(string previewPath)
     {
@@ -49,7 +55,8 @@ public sealed class PluginServicesBridge : IPluginServices
             return new DecodedPixels(0, 0, []);
         }
 
-        var bmp = decoded.Bitmap;
+        // DecodedThumbnail.Bitmap 是调用方独占快照(ThumbnailService 快照语义)——拷完即释
+        using var bmp = decoded.Bitmap;
         var pixels = new byte[bmp.ByteCount];
         System.Runtime.InteropServices.Marshal.Copy(bmp.GetPixels(), pixels, 0, pixels.Length);
         return new DecodedPixels(bmp.Width, bmp.Height, pixels);
@@ -131,7 +138,9 @@ public sealed class PluginServicesBridge : IPluginServices
             orientation = 1;
         }
 
-        using var oriented = ThumbnailService.ApplyOrientation(sk, orientation);
+        // ApplyOrientation 在 orientation 0/1 时原样返回输入(同一对象),
+        // 交给外层 using var sk 统一释放, 保持所有权清晰。
+        var oriented = ThumbnailService.ApplyOrientation(sk, orientation);
         using var img = SkiaSharp.SKImage.FromBitmap(oriented);
         using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
         return data.ToArray();

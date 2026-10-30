@@ -60,15 +60,18 @@ public partial class PhotoCardViewModel : ObservableObject
     /// <summary>是否已标记(徽点显隐)。</summary>
     public bool IsMarked => Tag != PhotoTag.Unmarked;
 
-    /// <summary>把解码结果包装为 Avalonia 位图(SKBitmap 统一 Bgra8888)。</summary>
+    /// <summary>
+    /// 把解码结果包装为 Avalonia 位图(SKBitmap 统一 Bgra8888)。
+    /// DecodedThumbnail.Bitmap 是调用方独占快照 —— 像素已拷入 WriteableBitmap, 拷贝完立即释放。
+    /// </summary>
     public static Bitmap? ToBitmap(DecodedThumbnail decoded)
     {
-        if (decoded.Status != DecodeStatus.Ok || decoded.Bitmap is null)
+        using var bmp = decoded.Bitmap;
+        if (bmp is null)
         {
             return null;
         }
 
-        var bmp = decoded.Bitmap;
         var size = new PixelSize(bmp.Width, bmp.Height);
         var dpi = new Vector(96, 96);
         return new WriteableBitmap(
@@ -89,9 +92,9 @@ public partial class PhotoCardViewModel : ObservableObject
         }
 
         var decoded = await Task.Run(() => service.GetView(Pair, edge));
-        if (decoded.Status == DecodeStatus.Ok && decoded.Bitmap is not null)
+        if (decoded.Status == DecodeStatus.Ok)
         {
-            var bitmap = ToBitmap(decoded);
+            var bitmap = ToBitmap(decoded); // 内部释放快照
             if (bitmap is not null)
             {
                 Thumbnail = bitmap;
@@ -109,9 +112,9 @@ public partial class PhotoCardViewModel : ObservableObject
         }
 
         var decoded = await Task.Run(() => service.GetView(Pair, edge));
-        if (decoded.Status == DecodeStatus.Ok && decoded.Bitmap is not null)
+        if (decoded.Status == DecodeStatus.Ok)
         {
-            var bitmap = ToBitmap(decoded);
+            var bitmap = ToBitmap(decoded); // 内部释放快照
             if (bitmap is not null)
             {
                 CompareView = bitmap;

@@ -10,6 +10,9 @@
 
   <ItemGroup>
     <None Include="Worker\**\*.py" CopyToOutputDirectory="PreserveNewest" Link="plugins\python\%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- 仓库根 plugins/python/ 下的插件(如 histogram)随构建自动进 bin —— 2026-10-31 起
+         不再手工同步(此前清 bin 即丢插件, 直方图模式消失)。../../ 相对 Python 工程目录。 -->
+    <None Include="..\..\plugins\python\**\*.*" CopyToOutputDirectory="PreserveNewest" Link="plugins\python\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -71,6 +71,34 @@ public sealed class ExifAndOrientationTests
         // 方向归一化后,竖拍图的"高"是长边
         Assert.True(large.Bitmap.Height > large.Bitmap.Width);
     }
+
+    [SkippableFact]
+    public void GetView_AtEdgeLargerThanImage_PixelsRemainValid()
+    {
+        // 回归测试: 修复前, edge >= 原图边长时 Scale() 原样返回输入位图,
+        // 而 Decode() 的 using 在退出时已将其释放 → 缓存持有已释放 SKBitmap,
+        // 访问 ByteCount/GetPixels 直接 AccessViolationException(JPEG 预览闪退根因)。
+        Skip.IfNot(SampleExists, "样张缺失");
+
+        var service = new ThumbnailService();
+        var pair = new Wuling.Core.Models.PhotoPair { DisplayName = "P", JpegPath = SampleJpg };
+
+        var large = service.GetView(pair, 8192); // 样张 4272x2856, 8192 边长必然走"不缩放"路径
+
+        // 访问原生属性并完整拷贝像素 —— 修复前此处即崩溃
+        Assert.True(large.Bitmap!.ByteCount > 0);
+        var pixels = new byte[large.Bitmap.ByteCount];
+        System.Runtime.InteropServices.Marshal.Copy(large.Bitmap.GetPixels(), pixels, 0, pixels.Length);
+        Assert.Equal(4272 * 2856 * 4, large.Bitmap.ByteCount);
+        large.Bitmap.Dispose(); // 快照归调用方所有
+
+        // 快照语义(2026-10-31): 每次借出都是调用方独占拷贝(实例必不同),
+        // 但内容等价;缓存内共享位图永不出服务。
+        var again = service.GetView(pair, 8192);
+        Assert.NotSame(large.Bitmap, again.Bitmap); // 独占快照, 非共享实例
+        Assert.Equal(4272 * 2856 * 4, again.Bitmap!.ByteCount);
+        again.Bitmap.Dispose();
+    }
 }
 
 /// <summary>xUnit 跳过特性(避免引入额外包)。</summary>

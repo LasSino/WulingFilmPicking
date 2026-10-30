@@ -10,6 +10,10 @@ namespace Wuling.Imaging;
 /// - 对比区: GetView(edge) 按槽位实际尺寸解码/缩放的全清晰度视图;
 /// - 全部输出经 ApplyOrientation 归一化 EXIF 方向(修复 M1 旋转问题);
 /// - 同 key 并发单飞,内存 LRU 按字节计量,双级共用一个缓存池。
+///
+/// 所有权契约(2026-10-31 快照语义): DecodedThumbnail.Bitmap 是调用方独占的拷贝,
+/// 调用方负责 Dispose;缓存内的共享位图永不出服务 —— LRU 驱逐与 Dispose 都不会
+/// 悬空任何借出方(此前共享外借在切目录/驱逐窗口期产生 AccessViolationException)。
 /// </summary>
 public sealed class ThumbnailService : IDisposable
 {
@@ -42,7 +46,21 @@ public sealed class ThumbnailService : IDisposable
         }
 
         Touch(key);
-        return entry.ToResult();
+        // 快照语义: 与驱逐/Dispose 互斥地做一次深拷贝, 借出方持有独占副本。
+        // 缓存内共享位图绝不离开服务, 调用方用完 Dispose 即可。
+        SkiaSharp.SKBitmap? copy;
+        lock (_gate)
+        {
+            copy = entry.Snapshot();
+        }
+
+        if (copy is null)
+        {
+            // 极小概率: 拿到 entry 后被 Dispose 竞态释放 → 按缓存未命中重试一次
+            return GetView(pair, edge);
+        }
+
+        return new DecodedThumbnail(DecodeStatus.Ok, copy, entry.SourceWidth, entry.SourceHeight);
     }
 
     internal static string CacheKey(string path, int edge) => $"{path}|{edge}";
@@ -55,18 +73,34 @@ public sealed class ThumbnailService : IDisposable
         try
         {
             using var stream = File.OpenRead(path);
-            using var original = SkiaSharp.SKBitmap.Decode(stream);
+            var original = SkiaSharp.SKBitmap.Decode(stream);
             if (original is null)
             {
                 return null;
             }
 
-            // 1) 方向归一化(修 M1 的旋转问题;浏览条与对比区一次修复)
-            using var oriented = ApplyOrientation(original, _exif.GetSummary(path).Orientation);
+            // 1) 方向归一化(修 M1 的旋转问题;浏览条与对比区一次修复)。
+            //    无需处理(orientation 0/1)时返回的就是 original 本身 —— 所有权转移。
+            var oriented = ApplyOrientation(original, _exif.GetSummary(path).Orientation);
+            if (!ReferenceEquals(oriented, original))
+            {
+                original.Dispose();
+            }
 
-            // 2) 按需缩放(目标边长;原图不足目标时保留原尺寸)
+            // 2) 按需缩放(目标边长;原图不足目标时保留原尺寸)。
+            //    scale>=1 时返回的就是 oriented 本身, 而它将进入缓存条目被长期持有,
+            //    因此绝不能用 using 在本方法退出时释放 —— 否则缓存里存的是已释放
+            //    的 SKBitmap, 之后 GetPixels 访问 ByteCount/GetPixels 即
+            //    AccessViolationException(JPEG 预览 edge=0 路径必现闪退的根因)。
             var scaled = Scale(oriented, edge);
-            var entry = new CacheEntry(scaled, oriented.Width, oriented.Height);
+            var sourceWidth = oriented.Width;
+            var sourceHeight = oriented.Height;
+            if (!ReferenceEquals(scaled, oriented))
+            {
+                oriented.Dispose();
+            }
+
+            var entry = new CacheEntry(scaled, sourceWidth, sourceHeight);
             lock (_gate)
             {
                 _currentBytes += entry.Bytes;
@@ -195,13 +229,16 @@ public sealed class ThumbnailService : IDisposable
 
     public void Dispose()
     {
-        foreach (var lazy in _cache.Values)
+        lock (_gate)
         {
-            lazy.Value?.Dispose();
-        }
+            foreach (var lazy in _cache.Values)
+            {
+                lazy.Value?.Dispose();
+            }
 
-        _cache.Clear();
-        _lru.Clear();
+            _cache.Clear();
+            _lru.Clear();
+        }
     }
 
     private sealed class CacheEntry : IDisposable
@@ -211,14 +248,44 @@ public sealed class ThumbnailService : IDisposable
             Bitmap = bitmap;
             SourceWidth = sourceWidth;
             SourceHeight = sourceHeight;
+            Bytes = (long)bitmap.ByteCount;
         }
 
         public SkiaSharp.SKBitmap Bitmap { get; }
         public int SourceWidth { get; }
         public int SourceHeight { get; }
-        public long Bytes => (long)Bitmap.ByteCount;
 
-        public DecodedThumbnail ToResult() => new(DecodeStatus.Ok, Bitmap, SourceWidth, SourceHeight);
-        public void Dispose() => Bitmap.Dispose();
+        /// <summary>字节计量在构造时固化(此后不再读位图, 避免 Dispose 竞态)。</summary>
+        public long Bytes { get; }
+
+        /// <summary>
+        /// 深拷贝位图(必须在宿主 _gate 锁内调用, 与驱逐/Dispose 互斥)。
+        /// 返回 null = 本条目已被并发释放(调用方按未命中重试)。
+        /// </summary>
+        public SkiaSharp.SKBitmap? Snapshot()
+        {
+            if (_disposed)
+            {
+                return null;
+            }
+
+            try
+            {
+                return Bitmap.Copy();
+            }
+            catch (AccessViolationException)
+            {
+                // 已释放(理论不可达, 锁已互斥);防御性兜底
+                return null;
+            }
+        }
+
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            _disposed = true;
+            Bitmap.Dispose();
+        }
     }
 }

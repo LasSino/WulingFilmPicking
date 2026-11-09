@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    name: build+test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # .slnx 需要 .NET SDK 9.0.200+;统一 10.x(与本地开发一致)
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build WulingFilmPicking.slnx -c Release -v q
+
+      # RAW/JPEG 样张不入库(gitignore), 样张依赖的测试自动跳过
+      - name: Test
+        run: dotnet test WulingFilmPicking.slnx -c Release --no-build -v q
+
+      - name: Publish smoke (single-file, self-contained)
+        shell: bash
+        run: |
+          RID="${{ startsWith(matrix.os, 'windows') && 'win-x64' || (startsWith(matrix.os, 'macos') && 'osx-arm64' || 'linux-x64') }}"
+          dotnet publish src/Wuling.App -c Release -r "$RID" --self-contained true \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+            -o "artifacts/$RID"
+          # 发布产物必须带 Python 插件目录(Worker/SDK/histogram 以 Content 落盘)
+          test -f "artifacts/$RID/plugins/python/wuling_worker.py"
+          test -f "artifacts/$RID/plugins/python/wuling_sdk.py"
+          test -f "artifacts/$RID/plugins/python/histogram/plugin.json"

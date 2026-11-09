@@ -1,4 +1,8 @@
 # WulingFilmPicking 武陵选片局 - 照片初选 
+
+![CI](https://github.com/LasSino/WulingFilmPicking/actions/workflows/ci.yml/badge.svg)
+![Release](https://github.com/LasSino/WulingFilmPicking/actions/workflows/release.yml/badge.svg)
+
 武陵选片局是一个用于相机照片初选的应用。
 相机佬在拍照时，经常会对一个场景拍很多张照片，其中大部分会由于对焦不稳、构图不对、或者只是单独没有其他张拍得好，而成为不需要的废片。这些照片没必要流转到LR等重量级的后期工作流中，武陵选片局就是这样一个轻量级的初选工具，用于直接筛选出需要过滤的照片。
 
@@ -26,6 +30,22 @@
 - **会话持久化**: 标记/槽位/模式/处置设置原子写入 `<目录>/.wuling/session.json`,重开即恢复
 - **提交处置**: 三类标记各自动作(不动/移动/软删除/永久删除)可配置,RAW+JPEG 绑定,软删除入 `.wuling/trash/` 可还原,事务日志 `commit-log.jsonl`
 
+## 下载与安装
+
+从 [Releases](https://github.com/LasSino/WulingFilmPicking/releases) 下载对应平台压缩包,解压即用(自包含运行时,无需安装 .NET):
+
+| 文件 | 平台 | 说明 |
+| --- | --- | --- |
+| `WulingFilmPicking-win-x64.zip` | Windows 10+ x64 | 解压后运行 `Wuling.App.exe` |
+| `WulingFilmPicking-linux-x64.tar.gz` | Linux x64 | 解压后运行 `./Wuling.App` |
+| `WulingFilmPicking-osx-arm64.tar.gz` | macOS Apple Silicon | 解压后拖入「应用程序」;首次打开需右键 → 打开(未签名) |
+| `WulingFilmPicking-osx-x64.tar.gz` | macOS Intel | 同上 |
+
+> 包内 `plugins/python/` 是 Python 引擎(Worker/SDK)与插件,删除会失去直方图模式;
+> Python 解释器不用安装也可用 C# 模式,安装后(≥3.9,含 PATH)自动启用 Python 插件。
+
+发版流程: push tag `v*`(如 `v0.4.0`)→ GitHub Actions 四平台发布并自动创建 Release。
+
 ## 开发环境
 
 - .NET 8 SDK (LTS)
@@ -35,7 +55,7 @@
 
 ```bash
 dotnet build WulingFilmPicking.slnx     # 构建
-dotnet test                             # 运行单元测试 (32 个)
+dotnet test                             # 运行单元测试 (38 个; RAW/JPEG 样张依赖项自动跳过)
 dotnet run --project src/Wuling.App     # 启动应用
 ```
 

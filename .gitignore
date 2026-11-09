@@ -42,3 +42,6 @@ __pycache__/
 publish/
 *.appx
 *.msix
+
+# 本地发布产物(CI 产物入库由 Actions 负责)
+artifacts/

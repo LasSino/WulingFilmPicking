@@ -25,11 +25,9 @@ public sealed class RawPreviewExtractionTests
     private static string Rw2Path => Path.Combine(RepoRoot, "P1580350.RW2");
     private static string RafPath => Path.Combine(RepoRoot, "DSCF7264.RAF");
 
-    [SkippableFact]
+    [SkippableFact("P1580350.RW2")]
     public void Extract_Rw2_HasEmbeddedJpeg()
     {
-        Skip.IfNot(File.Exists(Rw2Path), "RW2 样张缺失");
-
         var result = RawPreviewExtractor.Extract(Rw2Path);
 
         Assert.True(result.HasPreview, "RW2 应有内嵌预览");
@@ -38,14 +36,12 @@ public sealed class RawPreviewExtractionTests
         Assert.Equal(0xD8, result.JpegBytes[1]);
     }
 
-    [SkippableFact]
+    [SkippableFact("DSCF7264.RAF")]
     public void Extract_Raf_HasFullSizeEmbeddedJpeg()
     {
         // 回归测试: 2026-10-31 修复前 ExtractRaf 读错头部字段(0x5C/0x60 是 CFA 块非预览)
         // 且 stackalloc 84B 越界读 0x60 → 异常被吞 → 富士 RAF 永远"无内嵌预览"。
         // 修复后: 0x54=JPEG 起点/0x58=JPEG 长度, X-T20 样张应提取出 1920x1280 预览。
-        Skip.IfNot(File.Exists(RafPath), "RAF 样张缺失");
-
         Assert.True(RawPreviewExtractor.IsRawExtension(RafPath));
         Assert.Equal("RAF", RawPreviewExtractor.FormatName(RafPath));
 
@@ -60,11 +56,9 @@ public sealed class RawPreviewExtractionTests
         Assert.Equal(1280, result.Height);
     }
 
-    [SkippableFact]
+    [SkippableFact("DSCF7264.RAF")]
     public void Extract_Raf_ResultDecodableBySkia()
     {
-        Skip.IfNot(File.Exists(RafPath), "RAF 样张缺失");
-
         var result = RawPreviewExtractor.Extract(RafPath);
         Assert.True(result.HasPreview);
 

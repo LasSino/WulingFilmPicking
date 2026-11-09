@@ -25,12 +25,10 @@ public sealed class ThumbnailSnapshotTests
 
     private static string SampleJpg => Path.Combine(RepoRoot, "P1580350.JPG");
 
-    [SkippableFact]
+    [SkippableFact("P1580350.JPG")]
     public void Snapshot_SurvivesServiceDispose()
     {
         // 崩溃路径复现: 后台拿到快照 → 服务被 Dispose(切目录) → 消费方仍可用
-        Skip.IfNot(File.Exists(SampleJpg), "样张缺失");
-
         var service = new ThumbnailService();
         var pair = new PhotoPair { DisplayName = "P", JpegPath = SampleJpg };
         var borrowed = service.GetView(pair, 2048).Bitmap;
@@ -44,12 +42,10 @@ public sealed class ThumbnailSnapshotTests
         borrowed.Dispose();
     }
 
-    [SkippableFact]
+    [SkippableFact("P1580350.JPG")]
     public async Task Snapshot_ConcurrentBorrowersAreIndependent()
     {
         // 多借出方并发: 各自持有独立快照, 任一方 Dispose 不影响其他方(与共享语义的根本区别)
-        Skip.IfNot(File.Exists(SampleJpg), "样张缺失");
-
         var service = new ThumbnailService();
         var pair = new PhotoPair { DisplayName = "P", JpegPath = SampleJpg };
 

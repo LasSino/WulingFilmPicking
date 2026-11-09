@@ -25,11 +25,9 @@ public sealed class ExifAndOrientationTests
 
     public static bool SampleExists => File.Exists(SampleJpg);
 
-    [SkippableFact]
+    [SkippableFact("P1580350.JPG")]
     public void ExifProvider_ReadsOrientationAndCaptureParams()
     {
-        Skip.IfNot(SampleExists, "样张缺失");
-
         var exif = new ExifProvider().GetSummary(SampleJpg);
 
         Assert.Equal(8, exif.Orientation); // 竖拍: 逆时针 90°
@@ -39,11 +37,9 @@ public sealed class ExifAndOrientationTests
         Assert.False(string.IsNullOrEmpty(exif.Iso));
     }
 
-    [SkippableFact]
+    [SkippableFact("P1580350.JPG")]
     public void ApplyOrientation_SwapsDimensionsForRotation90()
     {
-        Skip.IfNot(SampleExists, "样张缺失");
-
         using var stream = File.OpenRead(SampleJpg);
         using var source = SkiaSharp.SKBitmap.Decode(stream);
         Assert.Equal(4272, source.Width);
@@ -55,11 +51,9 @@ public sealed class ExifAndOrientationTests
         Assert.Equal(4272, oriented.Height);
     }
 
-    [SkippableFact]
+    [SkippableFact("P1580350.JPG")]
     public void GetView_AtLargeEdge_IsNotTheTinyThumbnail()
     {
-        Skip.IfNot(SampleExists, "样张缺失");
-
         var service = new ThumbnailService();
         var pair = new Wuling.Core.Models.PhotoPair { DisplayName = "P", JpegPath = SampleJpg };
 
@@ -72,13 +66,9 @@ public sealed class ExifAndOrientationTests
         Assert.True(large.Bitmap.Height > large.Bitmap.Width);
     }
 
-    [SkippableFact]
+    [SkippableFact("P1580350.JPG")]
     public void GetView_AtEdgeLargerThanImage_PixelsRemainValid()
     {
-        // 回归测试: 修复前, edge >= 原图边长时 Scale() 原样返回输入位图,
-        // 而 Decode() 的 using 在退出时已将其释放 → 缓存持有已释放 SKBitmap,
-        // 访问 ByteCount/GetPixels 直接 AccessViolationException(JPEG 预览闪退根因)。
-        Skip.IfNot(SampleExists, "样张缺失");
 
         var service = new ThumbnailService();
         var pair = new Wuling.Core.Models.PhotoPair { DisplayName = "P", JpegPath = SampleJpg };
@@ -101,26 +91,34 @@ public sealed class ExifAndOrientationTests
     }
 }
 
-/// <summary>xUnit 跳过特性(避免引入额外包)。</summary>
+/// <summary>
+/// xUnit 跳过特性: 构造期检查样张文件, 缺失则设置 Skip 属性。
+/// 必须在 attribute 构造期跳过 —— 测试体内抛自定义异常在 xUnit 2.x 里按 FAIL 处理
+/// 而非 Skip(CI 无样张曾致 9 个测试假失败, 2026-11-09)。
+/// </summary>
 public sealed class SkippableFactAttribute : FactAttribute
 {
-    public SkippableFactAttribute()
+    public SkippableFactAttribute(params string[] requiredFiles)
     {
-        // 在构造时无法判断(需要静态上下文),用条件执行代替:
-        // 这里保留空实现,实际跳过逻辑由测试体内 Skip 判断完成。
-    }
-}
-
-/// <summary>Skip 辅助。</summary>
-public static class Skip
-{
-    public static void IfNot(bool condition, string reason)
-    {
-        if (!condition)
+        var root = FindRepoRoot();
+        foreach (var file in requiredFiles)
         {
-            throw new XunitSkipException(reason);
+            if (!File.Exists(Path.Combine(root, file)))
+            {
+                Skip = $"样张缺失: {file}";
+                return;
+            }
         }
     }
-}
 
-public sealed class XunitSkipException(string reason) : Exception(reason);
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "WulingFilmPicking.slnx")))
+        {
+            dir = dir.Parent!;
+        }
+
+        return dir?.FullName ?? string.Empty;
+    }
+}
